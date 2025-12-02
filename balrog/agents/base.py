@@ -15,6 +15,14 @@ class BaseAgent:
         self.prompt_builder.update_observation(observation)
         self.prompt_builder.update_action(action)
 
+    def build_system_prompt(self, env_instruction: str) -> str:
+        """Build the system prompt, optionally modifying the environment instruction.
+
+        Override this method to prepend/append agent-specific instructions.
+        Default implementation returns the environment instruction unchanged.
+        """
+        return env_instruction
+
     def reset(self):
         """Reset the prompt builder."""
         self.prompt_builder.reset()

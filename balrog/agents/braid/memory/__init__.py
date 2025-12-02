@@ -1,5 +1,4 @@
 from .backends import FileMemoryBackend
-from .interface import MemoryBackend, MemoryEntry
-from .transient import TransientMemory
+from .interface import MemoryBackend, MemoryEntry, MemoryScope
 
-__all__ = ["MemoryBackend", "MemoryEntry", "FileMemoryBackend", "TransientMemory"]
+__all__ = ["MemoryBackend", "MemoryEntry", "MemoryScope", "FileMemoryBackend"]

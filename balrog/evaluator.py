@@ -1,11 +1,9 @@
-import copy
 import csv
 import json
 import logging
 import multiprocessing
 import os
 import random
-import time
 import traceback
 from collections import defaultdict
 from pathlib import Path
@@ -273,7 +271,8 @@ class Evaluator:
         instructions = None
         if self.env_name == "babyai":
             instructions = obs["mission"]
-        agent.prompt_builder.update_instruction_prompt(env.get_instruction_prompt(instructions=instructions))
+        env_instruction = env.get_instruction_prompt(instructions=instructions)
+        agent.prompt_builder.update_instruction_prompt(agent.build_system_prompt(env_instruction))
 
         episode_return = 0.0
 

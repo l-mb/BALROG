@@ -9,7 +9,6 @@ agent:
   braid:                 # BRAID agent settings (if using 'braid' type)
     persistent_memory_path: "memory/nethack_knowledge.json"
     max_persistent_context: 20
-    episode_number: 0
 
 eval:
   output_dir: "results"  # Directory where evaluation results will be saved
