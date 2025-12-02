@@ -1,13 +1,14 @@
 from balrog.client import create_llm_client
 
 from ..prompt_builder import create_prompt_builder
+from .braid import BRAIDAgent
 from .chain_of_thought import ChainOfThoughtAgent
 from .custom import CustomAgent
 from .dummy import DummyAgent
 from .few_shot import FewShotAgent
 from .naive import NaiveAgent
-from .robust_naive import RobustNaiveAgent
 from .robust_cot import RobustCoTAgent
+from .robust_naive import RobustNaiveAgent
 
 
 class AgentFactory:
@@ -56,6 +57,7 @@ class AgentFactory:
             return RobustNaiveAgent(client_factory, prompt_builder)
         elif self.config.agent.type == "robust_cot":
             return RobustCoTAgent(client_factory, prompt_builder, config=self.config)
-
+        elif self.config.agent.type == "braid":
+            return BRAIDAgent(client_factory, prompt_builder, config=self.config)
         else:
             raise ValueError(f"Unknown agent type: {self.config.agent}")
