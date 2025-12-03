@@ -296,6 +296,7 @@ class BraidStorage:
         reasoning: str | None = None,
         cache_creation_tokens: int = 0,
         cache_read_tokens: int = 0,
+        extended_thinking: str | None = None,
     ) -> None:
         data: dict[str, Any] = {
             "action": action,
@@ -312,6 +313,8 @@ class BraidStorage:
         if cache_creation_tokens or cache_read_tokens:
             data["cache_create"] = cache_creation_tokens
             data["cache_read"] = cache_read_tokens
+        if extended_thinking:
+            data["extended_thinking"] = extended_thinking
         self._log(episode, step, "response", data)
 
     def log_memory_update(

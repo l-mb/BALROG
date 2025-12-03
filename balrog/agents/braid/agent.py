@@ -325,6 +325,7 @@ Memories are provided to you later.
             reasoning=reasoning,
             cache_creation_tokens=getattr(response, "cache_creation_tokens", 0) or 0,
             cache_read_tokens=getattr(response, "cache_read_tokens", 0) or 0,
+            extended_thinking=getattr(response, "extended_thinking", None),
         )
 
         # Log memory updates

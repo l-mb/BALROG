@@ -348,6 +348,10 @@ article header {
     border-left-color: #2ecc71;
 }
 
+.debug-role-thinking {
+    border-left-color: #9b59b6;
+}
+
 /* Responsive */
 @media (max-width: 900px) {
     .top-row {

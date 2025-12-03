@@ -136,16 +136,22 @@
       <header>Full Response{% if full_response %} (step {{ full_response.step }}, {{ full_response.in_tok }} in / {{ full_response.out_tok }} out){% endif %}</header>
       <div class="debug-content">
         {% if full_response %}
+        {% if full_response.extended_thinking %}
+        <div class="debug-message debug-role-thinking">
+          <div class="debug-role">extended thinking</div>
+          <pre>{{ full_response.extended_thinking }}</pre>
+        </div>
+        {% endif %}
+        {% if full_response.reasoning %}
+        <div class="debug-message">
+          <div class="debug-role">reasoning (&lt;think&gt;)</div>
+          <pre>{{ full_response.reasoning }}</pre>
+        </div>
+        {% endif %}
         <div class="debug-message">
           <div class="debug-role">action</div>
           <pre>{{ full_response.action }}</pre>
         </div>
-        {% if full_response.reasoning %}
-        <div class="debug-message">
-          <div class="debug-role">reasoning</div>
-          <pre>{{ full_response.reasoning }}</pre>
-        </div>
-        {% endif %}
         {% else %}
         <p class="muted">No response yet</p>
         {% endif %}

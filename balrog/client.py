@@ -21,8 +21,9 @@ LLMResponse = namedtuple(
         "reasoning",
         "cache_creation_tokens",
         "cache_read_tokens",
+        "extended_thinking",
     ],
-    defaults=[0, 0],  # Default cache tokens to 0 for non-Anthropic clients
+    defaults=[0, 0, None],  # Default cache tokens to 0, extended_thinking to None
 )
 
 httpx_logger = logging.getLogger("httpx")
@@ -502,6 +503,9 @@ class ClaudeWrapper(LLMClientWrapper):
         self._initialize_client()
         system_content, converted_messages = self.convert_messages(messages)
 
+        # Check for extended thinking budget
+        thinking_budget = self.client_kwargs.get("thinking_budget", 0)
+
         def api_call():
             # Create kwargs for the API call
             api_kwargs = {
@@ -514,9 +518,18 @@ class ClaudeWrapper(LLMClientWrapper):
             if system_content:
                 api_kwargs["system"] = system_content
 
-            # Only include temperature if it's not None
+            # Enable extended thinking if budget specified
+            if thinking_budget > 0:
+                api_kwargs["thinking"] = {
+                    "type": "enabled",
+                    "budget_tokens": thinking_budget,
+                }
+                # Extended thinking requires higher max_tokens
+                api_kwargs["max_tokens"] = max(api_kwargs["max_tokens"], thinking_budget + 1024)
+
+            # Only include temperature if it's not None (not compatible with thinking)
             temperature = self.client_kwargs.get("temperature")
-            if temperature is not None:
+            if temperature is not None and thinking_budget == 0:
                 api_kwargs["temperature"] = temperature
 
             return self.client.messages.create(**api_kwargs, extra_headers=self._get_extra_headers())
@@ -528,22 +541,32 @@ class ClaudeWrapper(LLMClientWrapper):
         cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
         cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
 
-        # Debug: log cache info and full usage object
+        # Extract thinking and text content from response blocks
+        extended_thinking = None
+        completion_text = ""
+        for block in response.content:
+            if block.type == "thinking":
+                extended_thinking = block.thinking
+            elif block.type == "text":
+                completion_text = block.text.strip()
+
+        # Debug: log cache info and thinking usage
+        thinking_tokens = getattr(usage, "thinking_tokens", 0) or 0
         logger.info(
-            f"Claude usage: {usage}, "
-            f"cache_create={cache_creation}, cache_read={cache_read}, "
-            f"msgs={len(converted_messages)}, has_system={system_content is not None}"
+            f"Claude usage: in={usage.input_tokens}, out={usage.output_tokens}, "
+            f"thinking={thinking_tokens}, cache_create={cache_creation}, cache_read={cache_read}"
         )
 
         return LLMResponse(
             model_id=self.model_id,
-            completion=response.content[0].text.strip(),
+            completion=completion_text,
             stop_reason=response.stop_reason,
             input_tokens=response.usage.input_tokens,
             output_tokens=response.usage.output_tokens,
             reasoning=None,
             cache_creation_tokens=cache_creation,
             cache_read_tokens=cache_read,
+            extended_thinking=extended_thinking,
         )
 
 
