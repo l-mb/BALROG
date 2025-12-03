@@ -254,7 +254,7 @@ class MonitorDB:
         params.append(limit)
 
         rows = self.conn.execute(
-            f"""SELECT id, tags, content, scope, priority, source_episode, created_at, deleted
+            f"""SELECT id, tags, content, scope, priority, source_episode, source_step, created_at, deleted
                FROM memory {where}
                ORDER BY created_at DESC
                LIMIT ?""",

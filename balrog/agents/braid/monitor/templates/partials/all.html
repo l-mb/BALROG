@@ -63,6 +63,7 @@
         <thead>
           <tr>
             <th class="col-id">ID</th>
+            <th class="col-step">@</th>
             <th class="col-prio">P</th>
             <th class="col-tags">Tags</th>
             <th class="col-content">Content</th>
@@ -72,6 +73,7 @@
           {% for e in entries %}
           <tr class="{% if e.deleted %}deleted-entry{% endif %}{% if e.scope == 'persistent' %} persistent-entry{% endif %}">
             <td class="col-id"><code>{{ e.id[:6] }}</code></td>
+            <td class="col-step">{{ e.source_step if e.source_step is not none else '-' }}</td>
             <td class="col-prio">{{ e.priority }}</td>
             <td class="col-tags">{{ e.scope[:1] }} {{ e.tags }}</td>
             <td class="col-content">{{ e.content }}</td>

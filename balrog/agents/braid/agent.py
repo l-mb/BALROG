@@ -29,6 +29,8 @@ SOME MAP SYMBOLS:
 0=boulder (push with direction) `=rock/statue $=gold )=weapon [=armor
 !=potion ?=scroll /=wand ==ring "=amulet (=tool *= gem/stone
 
+Character status (values, alignment, current XP and to next level, etc, Turn number) is provided at the bottom of the map.
+
 INCOMPLETE MONSTER THREATS BY LETTER:
 a=ant(giant) b=blob c=cockatrice(DEADLY touch!) d=dog/jackal e=eye(floating paralyze!)
 f=cat g=gremlin h=humanoid i=imp j=jelly k=kobold l=leprechaun(steals gold)
@@ -104,8 +106,10 @@ enable_tags: ["tag"] | disable_tags: ["tag"] | reset_tags: true
 
 MEMORY:
 - scope: episode (cleared each ep) | persistent (survives)
+- T: indicates the step/turn at which this observation was recorded. (Compare to T: on map)
 - prio: 1-9, higher shown first when limit reached (default 5)
 - enable/disable_tags: filter what's shown; reset_tags: true to show all
+- update/replace: indirectly, map to remove + add
 - You're also provided with a list of existing tags and how many entries they have
 
 HINTS FOR MEMORY USE:
@@ -113,7 +117,8 @@ HINTS FOR MEMORY USE:
 - Could use tags for specific levels, areas, monsters, puzzles, short- and long-term planning, risk tracking, specific to character role, ...
 - Use episode memory for tracking exploration, stashes, plans, etc: anything that is only for this particular playthrough attempt
 - Use persistent memory to learn permanently and across runs, both tactically and strategically or meta attributes such as tagging strategy for memory, supplementing and overriding system prompt hints for play
-- Your long-term goal beyond this one episode is to get good at playing NetHack!
+- Remove outdated entries to focus better.
+- Your long-term goal beyond this one playthrough is to get good at playing NetHack!
 
 None of your thinking needs to be human readable. Encode as much signal as possible in a terse format and language entirely at your discretion, as long as the response format is maintained.
 
@@ -226,7 +231,7 @@ Memories are provided to you later.
         )
 
         if p_entries:
-            lines = [f"[{e.entry_id}] (prio:{e.priority}) (tags: {e.tags}) {e.content}" for e in p_entries]
+            lines = [f"[{e.entry_id}] T:{e.source_step or '?'} (prio:{e.priority}) (tags: {e.tags}) {e.content}" for e in p_entries]
             header = f"PERSISTENT ({len(p_entries)}"
             if len(p_entries) >= self.max_memory_context:
                 total = self.storage.count(tags=self._enabled_tags, scope=MemoryScope.PERSISTENT)
@@ -237,7 +242,7 @@ Memories are provided to you later.
             sections.append(f"{header}\n" + "\n".join(lines))
 
         if e_entries:
-            lines = [f"[{e.entry_id}] (prio:{e.priority}) (tags: {e.tags}) {e.content}" for e in e_entries]
+            lines = [f"[{e.entry_id}] @{e.source_step or '?'} (prio:{e.priority}) (tags: {e.tags}) {e.content}" for e in e_entries]
             header = f"EPISODE ({len(e_entries)}"
             if len(e_entries) >= self.max_memory_context:
                 total = self.storage.count(
@@ -403,6 +408,7 @@ Memories are provided to you later.
                             scope=scope,
                             priority=prio,
                             source_episode=self.episode_number,
+                            source_step=self._step,
                         )
                     )
                     self._mem_adds += 1

@@ -29,6 +29,7 @@ class MemoryEntry:
     scope: MemoryScope = MemoryScope.PERSISTENT
     priority: int = 5
     source_episode: int | None = None
+    source_step: int | None = None
     deleted: bool = False
     entry_id: str = ""
     created_at: str = ""
@@ -42,6 +43,7 @@ CREATE TABLE IF NOT EXISTS memory (
     scope TEXT NOT NULL CHECK (scope IN ('episode', 'persistent')),
     priority INTEGER NOT NULL DEFAULT 5 CHECK (priority BETWEEN 1 AND 9),
     source_episode INTEGER,
+    source_step INTEGER,
     deleted INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -80,6 +82,10 @@ class BraidStorage:
 
     def _init_schema(self) -> None:
         self.conn.executescript(_SCHEMA)
+        # Migrate existing DBs: add source_step column if missing
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(memory)").fetchall()}
+        if "source_step" not in cols:
+            self.conn.execute("ALTER TABLE memory ADD COLUMN source_step INTEGER")
         self.conn.commit()
 
     def _now(self) -> str:
@@ -92,8 +98,8 @@ class BraidStorage:
     def store(self, entry: MemoryEntry) -> str:
         entry_id = str(uuid.uuid4())[:8]
         self.conn.execute(
-            """INSERT INTO memory (id, tags, content, scope, priority, source_episode, deleted, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO memory (id, tags, content, scope, priority, source_episode, source_step, deleted, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 entry_id,
                 entry.tags,
@@ -101,6 +107,7 @@ class BraidStorage:
                 entry.scope.value,
                 entry.priority,
                 entry.source_episode,
+                entry.source_step,
                 int(entry.deleted),
                 self._now(),
             ),
@@ -238,6 +245,7 @@ class BraidStorage:
             scope=MemoryScope(row["scope"]),
             priority=row["priority"],
             source_episode=row["source_episode"],
+            source_step=row["source_step"],
             deleted=bool(row["deleted"]),
             entry_id=row["id"],
             created_at=row["created_at"],
