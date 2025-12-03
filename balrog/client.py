@@ -409,12 +409,25 @@ class ClaudeWrapper(LLMClientWrapper):
             self.client = Anthropic()
             self._initialized = True
 
-    def _get_extra_headers(self) -> dict[str, str]:
-        """Get extra headers for prompt caching."""
-        return {"anthropic-beta": "prompt-caching-2024-07-31"}
+    # Minimum tokens for caching by model family (per Anthropic docs)
+    # Opus 4.5 and Haiku 4.5: 4096 tokens
+    # Haiku 3.5/3: 2048 tokens
+    # Sonnet (all), Opus 4.1/4: 1024 tokens
+    MIN_CACHE_TOKENS_BY_MODEL = {
+        "haiku-4-5": 4096,
+        "opus-4-5": 4096,
+        "haiku-3-5": 2048,
+        "haiku-3": 2048,
+    }
+    MIN_CACHE_TOKENS_DEFAULT = 1024  # Sonnet models, Opus 4.1/4
 
-    # Minimum tokens required for caching (conservative: use Haiku's 2048)
-    MIN_CACHE_TOKENS = 2048
+    def _get_min_cache_tokens(self) -> int:
+        """Get minimum cacheable tokens for current model."""
+        model_lower = self.model_id.lower()
+        for pattern, min_tokens in self.MIN_CACHE_TOKENS_BY_MODEL.items():
+            if pattern in model_lower:
+                return min_tokens
+        return self.MIN_CACHE_TOKENS_DEFAULT
 
     def _estimate_tokens(self, text: str) -> int:
         """Rough token estimate: ~4 chars per token for English."""
@@ -424,8 +437,10 @@ class ClaudeWrapper(LLMClientWrapper):
         """Convert messages to the format expected by the Claude API with caching.
 
         Extracts system messages for the system parameter and adds cache_control
-        markers to optimize prompt caching. Only adds cache_control when content
-        exceeds the minimum token threshold (2048 for Haiku, 1024 for Sonnet).
+        markers to optimize prompt caching. Minimum token thresholds vary by model:
+        - Opus 4.5, Haiku 4.5: 4096 tokens
+        - Haiku 3.5/3: 2048 tokens
+        - Sonnet (all), Opus 4.1/4: 1024 tokens
 
         Args:
             messages (list): A list of message objects.
@@ -452,15 +467,17 @@ class ClaudeWrapper(LLMClientWrapper):
             if msg.attachment is not None:
                 converted_messages[-1]["content"].append(process_image_claude(msg.attachment))
 
-        # Always cache the system prompt - it's the only stable content
-        # (User messages change as history slides, breaking cache prefix)
+        # Cache the system prompt if it meets the model's minimum token threshold
+        # (System prompt is stable; user messages change as history slides, breaking cache prefix)
         if system_content:
+            min_tokens = self._get_min_cache_tokens()
             system_tokens = self._estimate_tokens(system_text)
-            if system_tokens >= self.MIN_CACHE_TOKENS:
+
+            if system_tokens >= min_tokens:
                 system_content[0]["cache_control"] = {"type": "ephemeral"}
-                logger.info(f"Cache breakpoint at system prompt, ~{system_tokens} tokens")
+                logger.debug(f"Cache breakpoint at system prompt: ~{system_tokens} tokens (min: {min_tokens})")
             else:
-                logger.info(f"System prompt too short for caching: ~{system_tokens} tokens (min: {self.MIN_CACHE_TOKENS})")
+                logger.debug(f"System prompt below cache threshold: ~{system_tokens} tokens (need {min_tokens})")
 
         return system_content, converted_messages
 
@@ -505,13 +522,18 @@ class ClaudeWrapper(LLMClientWrapper):
             if temperature is not None and thinking_budget == 0:
                 api_kwargs["temperature"] = temperature
 
-            return self.client.messages.create(**api_kwargs, extra_headers=self._get_extra_headers())
+            return self.client.messages.create(**api_kwargs)
 
         response = self.execute_with_retries(api_call)
 
-        # Extract cache metrics from response
+        # Extract cache metrics from response (try nested object first, then flat attrs)
         usage = response.usage
-        cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        cache_creation_obj = getattr(usage, "cache_creation", None)
+        if cache_creation_obj:
+            cache_creation = (getattr(cache_creation_obj, "ephemeral_5m_input_tokens", 0) or 0) + \
+                             (getattr(cache_creation_obj, "ephemeral_1h_input_tokens", 0) or 0)
+        else:
+            cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
         cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
 
         # Extract thinking and text content from response blocks
@@ -523,11 +545,10 @@ class ClaudeWrapper(LLMClientWrapper):
             elif block.type == "text":
                 completion_text = block.text.strip()
 
-        # Debug: log cache info and thinking usage
-        thinking_tokens = getattr(usage, "thinking_tokens", 0) or 0
+        # Log usage metrics
         logger.info(
             f"Claude usage: in={usage.input_tokens}, out={usage.output_tokens}, "
-            f"thinking={thinking_tokens}, cache_create={cache_creation}, cache_read={cache_read}"
+            f"cache_create={cache_creation}, cache_read={cache_read}"
         )
 
         return LLMResponse(
