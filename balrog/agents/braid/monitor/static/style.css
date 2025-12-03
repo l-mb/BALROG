@@ -221,8 +221,24 @@ dd {
 }
 
 /* Header nav tweaks */
+body > header.container-fluid {
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+}
+
+body > header nav {
+    margin: 0;
+}
+
 header nav ul {
     align-items: center;
+    margin: 0;
+    padding: 0;
+}
+
+header nav li {
+    margin: 0;
+    padding: 0;
 }
 
 /* Step navigation */

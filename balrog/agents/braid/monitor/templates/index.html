@@ -16,12 +16,7 @@
       </ul>
       <ul>
         <li>
-          <select id="agent-select" name="agent"
-                  hx-get="/partials/all/{value}"
-                  hx-trigger="change"
-                  hx-target="#panels"
-                  hx-swap="innerHTML"
-                  onchange="this.setAttribute('hx-get', '/partials/all/' + this.value); htmx.trigger(this, 'change')">
+          <select id="agent-select" name="agent" onchange="selectAgent(this.value)">
             {% for agent in agents %}
             <option value="{{ agent.worker_id }}" {% if agent.worker_id == selected %}selected{% endif %}>
               {{ agent.worker_id }} (ep{{ agent.episode }}:{{ agent.step }})
@@ -62,6 +57,9 @@
   </main>
 
   <script>
+    // Selected agent
+    let selectedAgent = '{{ selected }}';
+
     // Preserve scroll positions across htmx swaps
     let scrollPositions = {};
 
@@ -86,6 +84,20 @@
     // Step navigation state
     let currentStep = null;  // null = latest
     let maxStep = 0;
+
+    function selectAgent(agentId) {
+      selectedAgent = agentId;
+      currentStep = null;  // Reset to latest when switching agents
+      maxStep = 0;
+      updatePanelsUrl();
+      // Update URL bar
+      const url = new URL(window.location);
+      url.searchParams.set('agent', agentId);
+      window.history.replaceState({}, '', url);
+      // Trigger immediate refresh
+      const panels = document.getElementById('panels');
+      htmx.trigger(panels, 'load');
+    }
 
     function toggleAutoRefresh(enabled) {
       const panels = document.getElementById('panels');
@@ -173,12 +185,32 @@
       if (btn) btn.innerHTML = '&#9654;';  // Play symbol (triangle)
     }
 
-    // Update dropdown to reflect selected agent on page load
-    document.getElementById('agent-select').addEventListener('change', function() {
-      const url = new URL(window.location);
-      url.searchParams.set('agent', this.value);
-      window.history.replaceState({}, '', url);
-    });
+    // Periodically refresh agent list to show new agents/episodes
+    async function refreshAgentList() {
+      try {
+        const response = await fetch('/partials/agents?agent=' + encodeURIComponent(selectedAgent));
+        if (response.ok) {
+          const html = await response.text();
+          const select = document.getElementById('agent-select');
+          const currentValue = select.value;
+          select.innerHTML = html;
+          // Restore selection (might have new options now)
+          if (select.querySelector(`option[value="${selectedAgent}"]`)) {
+            select.value = selectedAgent;
+          } else if (select.options.length > 0) {
+            // Selected agent no longer exists, switch to first
+            selectedAgent = select.options[0].value;
+            select.value = selectedAgent;
+            updatePanelsUrl();
+          }
+        }
+      } catch (e) {
+        console.error('Failed to refresh agent list:', e);
+      }
+    }
+
+    // Refresh agent list every 5 seconds
+    setInterval(refreshAgentList, 5000);
 
     // Memory filter state
     let memoryScope = 'all';
@@ -209,7 +241,7 @@
 
     function updatePanelsUrl() {
       const panels = document.getElementById('panels');
-      const baseUrl = panels.getAttribute('hx-get').split('?')[0];
+      const baseUrl = `/partials/all/${selectedAgent}`;
       const params = new URLSearchParams();
       if (memoryScope !== 'all') params.set('scope', memoryScope);
       if (showDeleted) params.set('deleted', '1');
@@ -267,6 +299,9 @@
       }
       updateStepDisplay();
     });
+
+    // Initialize panels URL on page load
+    updatePanelsUrl();
   </script>
 </body>
 </html>
