@@ -167,7 +167,7 @@ class MonitorDB:
         return None
 
     def get_recent_responses(
-        self, worker_id: str, limit: int = 20, max_step: int | None = None
+        self, worker_id: str, limit: int = 10, max_step: int | None = None
     ) -> list[dict]:
         """Get recent responses for an agent (newest first), optionally up to a step."""
         if max_step is not None:

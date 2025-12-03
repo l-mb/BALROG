@@ -75,7 +75,7 @@ def create_app(db_path: Path) -> Starlette:
 
         screen = db.get_latest_screen(worker_id, max_step=current_step)
         stats = db.get_stats(worker_id)
-        responses = db.get_recent_responses(worker_id, limit=20, max_step=current_step)
+        responses = db.get_recent_responses(worker_id, limit=10, max_step=current_step)
 
         # Memory filters from query params
         scope = request.query_params.get("scope")

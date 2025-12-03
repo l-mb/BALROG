@@ -1,7 +1,7 @@
 {% if response %}
 <dl>
   <dt>Action</dt>
-  <dd><code>{{ response.action }}</code></dd>
+  <dd>{{ response.action }}</dd>
   <dt>Latency</dt>
   <dd>{{ "{:.1f}".format(response.latency_ms / 1000) }}s</dd>
 </dl>

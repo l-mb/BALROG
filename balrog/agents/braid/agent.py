@@ -80,7 +80,9 @@ KEY STRATEGIES:
 - Monsters could be invisible
 - Tinning has beneficial effects
 - Magic markers should be blessed, have or create blessed scrolls of charging
-- Explore and move efficiently, do not waste movements, avoid retracing steps
+- Explore and move efficiently, do not waste movements, choose a consistent pathing pattern
+- The "far" actions allow you to move in a certain direction as far as possible, until an obstacle appears, and are very efficient for exploration (preferable to multi actions, even)
+- Remember which areas you have searched so you do not need to repeat
 - You can often move boulders, unless they're up against a dead end (wall, another boulder, or monster)
 - Once you have acquired the real Amulet of Yendor, you need to exit the Dungeon through the stairs up from level 1. Those elemental levels require careful preparation.
 
@@ -95,7 +97,8 @@ EARLY GAME PRIORITIES:
 COMMON MISTAKES TO AVOID:
 - Fighting when low HP instead of retreating
 - Eating unknown corpses (especially cockatrice!)
-- Most rings increase hunger
+- Most rings increase hunger (except slow digestion, very desirable!)
+- Invoking spells increases hunger
 - Praying too often (gods get angry, wait 800+ turns)
 - Attacking shopkeeper/temple priest (very dangerous)
 - Ignoring hunger until Fainting
@@ -122,18 +125,17 @@ enable_tags: ["tag"] | disable_tags: ["tag"] | reset_tags: true
            <|END|>
 
 MULTI-ACTION GUIDELINES:
-- Allows for more efficient and cost-effective playthroughs. Prioritize use when possible!
+- Allows for more efficient and cost-effective playthroughs. Prioritize use!
 - Use for: navigation sequences, repeated searches, search + navigation combos, safe routes
 - You can issue multiple move commands even in unknown paths. If it's a deadend, you'll simply stop.
-- Avoid for: combat, unknown areas, low HP, when you need feedback
+- Avoid for: combat, unknown areas, low HP
 - Queue aborts automatically on: combat, prompts requiring response, HP drop, traps
-- When unsure, use single action to get feedback first
 
 MEMORY:
-- scope: episode (cleared each ep) | persistent (survives)
+- scope: episode (cleared each play-through) | persistent (survives)
 - T: indicates the step/turn at which this observation was recorded. (Compare to T: on map)
 - prio: 1-9, higher shown first when limit reached (default 5)
-- enable/disable_tags: filter what's shown; reset_tags: true to show all
+- enable/disable_tags: filter what's included in prompt; reset_tags: true to include all
 - update/replace: indirectly, map to remove + add
 - You're also provided with a list of existing tags and how many entries they have
 
@@ -141,17 +143,16 @@ HINTS FOR MEMORY USE:
 - content/tags exclusive for agent only - abbreviate freely, disregard human readability, encode as much information as possible, regardless of language used
 - Could use tags for specific levels, areas, monsters, puzzles, short- and long-term planning, risk tracking, specific to character role, ...
 - Use episode memory for tracking exploration, stashes, plans, etc: anything that is only for this particular playthrough attempt
-- Use persistent memory to learn permanently and across runs, both tactically and strategically or meta attributes such as tagging strategy for memory, supplementing and overriding system prompt hints for play
-- Use memory as a todo list and plan
+- Use persistent memory to learn permanently and across runs, properties of monsters items etc, both tactically and strategically or meta attributes such as establishing a coherent tagging strategy for memory, supplementing and overriding system prompt hints for play
+- Use memory as a todo list and planner
 - Remove outdated entries to focus better
 - Do not duplicate content
 
-None of your thinking needs to be readable by or meaningful to a human. Encode as much signal as possible in a terse format and language entirely at your discretion while maintaing response structure.
+None of your thinking or reply needs to be readable by or meaningful to a human. Encode as much information as possible, however best. Language entirely at your discretion, but you MUST maintain response structure.
 
-The following includes several observations, your past actions, and the latest observation.
-Note that the language observation is an incomplete rendering of the map. Actual map takes precedence!
+At each turn, you are provided with this prompt and the current observation (map screenshot), and by the memories you have created.
 
-Memories are provided to you later.
+Note that the language observation is an incomplete rendering of the map meant to augment weaker LLMs. Actual ASCII map takes precedence!
 
 You MUST end with a valid ACTION or ACTIONS sequence.
 
