@@ -113,8 +113,10 @@ HINTS FOR MEMORY USE:
 - Use persistent memory to learn permanently and across runs, both tactically and strategically or meta attributes such as labelling strategy for memory, supplementing and overriding system prompt hints for play
 - Your long-term goal beyond this one episode is to get good at playing NetHack!
 
+None of your thinking needs to be human readable. Encode as much signal as possible in a terse format and language entirely at your discretion, as long as the response format is maintained.
+
 The following includes several observations, your past actions, and the latest observation.
-Note that the language observation is an incomplete rendering of the map.
+Note that the language observation is an incomplete rendering of the map. Map takes precedence.
 
 Memories are provided to you later.
 
