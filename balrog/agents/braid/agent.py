@@ -58,10 +58,11 @@ Ill=sick(pray or cure), FoodPois=food poisoning(pray). Burdened/Stressed=carryin
 DUNGEON BRANCHES:
 Dungeons of Doom (main): levels 1-~26, goal is to descend
 Gnomish Mines: entrance ~lvl 2-4, has Minetown with shops, temples, perhaps better gear
+Rogue level: "You enter what seems to ben an older, more primitive world.", lvl 15-18. Slightly different, more archaic rules and symbols.
 Sokoban: entrance ~lvl 5-9, puzzle branch with guaranteed useful items at end, can't move diagonally, boulders need to be pushed into pits, solve carefully with a plan
 Oracle: ~lvl 5-9, can consult for sometimes useful tips (costs gold)
 Castle: ~lvl 25, has wand of wishing in chest
-Gehennom: below Castle, fire and demons, working toward Amulet
+Gehennom: below Castle, fire and demons, working toward Amulet, many special levels
 
 KEY STRATEGIES:
 - Elbereth: engrave in dust (E then write "Elbereth", possibly using a wand of fire etc). Most monsters won't attack you on it. Moving might harm it. Safe spot for stashes.
@@ -69,6 +70,9 @@ KEY STRATEGIES:
 - Price ID: in shops, base prices can reveal item identity (e.g., 300zm scroll = identify)
 - Priests: Giving them gold (between 200 to 400 times player level) can grant intrinsic protection
 - Wand testing: engrave letter with wand, message can reveal wand type
+- You don't need to move into suspected walls to identify them. It's more efficient to move and search.
+- Certain rings and character abilities and eating (tinned) corpses can convey auto-search.
+- Stealth is very important to acquire.
 - Fountain: quaff for random effects, dip for Excalibur if lawful with long sword
 - Stash: leave items on early levels to retrieve later
 - Pet: keep fed (throw food), can steal from shops, detects mimics/traps
@@ -99,6 +103,7 @@ COMMON MISTAKES TO AVOID:
 - Forgetting where stairs up are located
 - Using unidentified wands pointed at self
 - Stepping on traps repeatedly (use search)
+- Losing track of short- and long-term plans
 
 RESPONSE FORMAT (all parts in single response):
 1. Optional thinking if situation requires it according to your judgment: <think>terse analysis</think>
@@ -137,15 +142,18 @@ HINTS FOR MEMORY USE:
 - Could use tags for specific levels, areas, monsters, puzzles, short- and long-term planning, risk tracking, specific to character role, ...
 - Use episode memory for tracking exploration, stashes, plans, etc: anything that is only for this particular playthrough attempt
 - Use persistent memory to learn permanently and across runs, both tactically and strategically or meta attributes such as tagging strategy for memory, supplementing and overriding system prompt hints for play
-- Remove outdated entries to focus better.
-- Do not duplicate content.
+- Use memory as a todo list and plan
+- Remove outdated entries to focus better
+- Do not duplicate content
 
-None of your thinking needs to be human readable. Encode as much signal as possible in a terse format and language entirely at your discretion, as long as the response format is maintained.
+None of your thinking needs to be readable by or meaningful to a human. Encode as much signal as possible in a terse format and language entirely at your discretion while maintaing response structure.
 
 The following includes several observations, your past actions, and the latest observation.
-Note that the language observation is an incomplete rendering of the map. Map takes precedence.
+Note that the language observation is an incomplete rendering of the map. Actual map takes precedence!
 
 Memories are provided to you later.
+
+You MUST end with a valid ACTION or ACTIONS sequence.
 
 """.strip()
 
@@ -179,6 +187,10 @@ Memories are provided to you later.
         # Track memory update counts and details
         self._mem_adds = 0
         self._mem_removes = 0
+        self._mem_episode_adds = 0
+        self._mem_persistent_adds = 0
+        self._mem_episode_removes = 0
+        self._mem_persistent_removes = 0
         self._tag_changes = False
         self._added_entries: list[dict[str, Any]] = []
         self._removed_ids: list[str] = []
@@ -320,7 +332,6 @@ Memories are provided to you later.
             sections.append(tag_info)
 
         sections.append(current_content)
-        sections.append(self._get_action_instructions())
 
         return "\n\n".join(sections)
 
@@ -337,17 +348,15 @@ Memories are provided to you later.
         if not tag_counts:
             return ""
         tags_str = " ".join(f"{t}:{c}" for t, c in sorted(tag_counts.items()))
-        return f"[tags: {tags_str}]"
 
-    def _get_action_instructions(self) -> str:
-        """Minimal reminder - full instructions in system prompt."""
         if self._enabled_tags is None:
-            filter_state = "tags: all"
+            filter_state = "enabled tags: all"
         elif not self._enabled_tags:
-            filter_state = "tags: none (all hidden)"
+            filter_state = "enabled tags: none (all hidden)"
         else:
-            filter_state = f"tags: {','.join(sorted(self._enabled_tags))}"
-        return f"[{filter_state}] <|ACTION|>action<|END|>"
+            filter_state = f"enabled tags: {','.join(sorted(self._enabled_tags))}"
+        return f"[{filter_state}] [tags counters: {tags_str}]"
+
 
     def _parse_response(self, response: LLMResponse) -> LLMResponse:
         completion = response.completion
@@ -366,6 +375,10 @@ Memories are provided to you later.
         # Reset memory update counters
         self._mem_adds = 0
         self._mem_removes = 0
+        self._mem_episode_adds = 0
+        self._mem_persistent_adds = 0
+        self._mem_episode_removes = 0
+        self._mem_persistent_removes = 0
         self._tag_changes = False
         self._added_entries = []
         self._removed_ids = []
@@ -413,6 +426,10 @@ Memories are provided to you later.
             tag_changes=self._tag_changes,
             added_entries=self._added_entries if self._log_memory_details else None,
             removed_ids=self._removed_ids if self._log_memory_details else None,
+            episode_adds=self._mem_episode_adds,
+            persistent_adds=self._mem_persistent_adds,
+            episode_removes=self._mem_episode_removes,
+            persistent_removes=self._mem_persistent_removes,
         )
 
         return response._replace(reasoning=reasoning or completion, completion=action)
@@ -579,6 +596,10 @@ Memories are provided to you later.
                         )
                     )
                     self._mem_adds += 1
+                    if scope == MemoryScope.EPISODE:
+                        self._mem_episode_adds += 1
+                    else:
+                        self._mem_persistent_adds += 1
                     if self._log_memory_details:
                         self._added_entries.append({
                             "id": entry_id,
@@ -597,10 +618,15 @@ Memories are provided to you later.
                 removals = json.loads(f"[{remove_match.group(1)}]")
                 for entry_id in removals:
                     if isinstance(entry_id, str):
-                        self.storage.remove(entry_id)
-                        self._mem_removes += 1
-                        if self._log_memory_details:
-                            self._removed_ids.append(entry_id)
+                        removed_scope = self.storage.remove(entry_id)
+                        if removed_scope:
+                            self._mem_removes += 1
+                            if removed_scope == "episode":
+                                self._mem_episode_removes += 1
+                            else:
+                                self._mem_persistent_removes += 1
+                            if self._log_memory_details:
+                                self._removed_ids.append(entry_id)
             except json.JSONDecodeError:
                 self.storage.log_error(self.episode_number, self._step, "Failed to parse memory removals")
 
