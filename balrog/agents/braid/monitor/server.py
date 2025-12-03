@@ -83,7 +83,11 @@ def create_app(db_path: Path) -> Starlette:
             scope = None
         include_deleted = request.query_params.get("deleted") == "1"
 
-        entries = db.get_memory_entries(limit=50, scope=scope, include_deleted=include_deleted)
+        # Pass current episode for episode-scoped memory filtering
+        current_episode = stats.episode if stats else None
+        entries = db.get_memory_entries(
+            limit=50, scope=scope, include_deleted=include_deleted, episode=current_episode
+        )
         return templates.TemplateResponse(
             request,
             "partials/all.html",

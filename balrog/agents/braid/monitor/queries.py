@@ -171,6 +171,7 @@ class MonitorDB:
         limit: int = 50,
         scope: str | None = None,
         include_deleted: bool = False,
+        episode: int | None = None,
     ) -> list[dict]:
         """Get memory entries ordered by recency.
 
@@ -178,6 +179,7 @@ class MonitorDB:
             limit: Max entries to return
             scope: Filter by 'persistent' or 'episode', or None for all
             include_deleted: If True, include soft-deleted entries
+            episode: Filter episode-scoped memories to this episode only
         """
         conditions = []
         params: list[str | int] = []
@@ -185,9 +187,18 @@ class MonitorDB:
         if not include_deleted:
             conditions.append("deleted = 0")
 
-        if scope in ("persistent", "episode"):
-            conditions.append("scope = ?")
-            params.append(scope)
+        if scope == "persistent":
+            conditions.append("scope = 'persistent'")
+        elif scope == "episode":
+            conditions.append("scope = 'episode'")
+            if episode is not None:
+                conditions.append("source_episode = ?")
+                params.append(episode)
+        else:
+            # "All": show persistent + episode memories for current episode only
+            if episode is not None:
+                conditions.append("(scope = 'persistent' OR (scope = 'episode' AND source_episode = ?))")
+                params.append(episode)
 
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         params.append(limit)

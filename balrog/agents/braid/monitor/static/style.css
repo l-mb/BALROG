@@ -153,6 +153,11 @@
     color: var(--pico-muted-color);
 }
 
+/* Persistent entries highlighted */
+.persistent-entry td {
+    font-weight: bold;
+}
+
 .memory-list table {
     font-size: 0.6rem;
     width: 100%;

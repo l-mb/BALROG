@@ -68,7 +68,7 @@
         </thead>
         <tbody>
           {% for e in entries %}
-          <tr{% if e.deleted %} class="deleted-entry"{% endif %}>
+          <tr class="{% if e.deleted %}deleted-entry{% endif %}{% if e.scope == 'persistent' %} persistent-entry{% endif %}">
             <td class="col-id"><code>{{ e.id[:6] }}</code></td>
             <td class="col-prio">{{ e.priority }}</td>
             <td class="col-tags">{{ e.scope[:1] }} {{ e.tags }}</td>
