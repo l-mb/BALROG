@@ -452,42 +452,15 @@ class ClaudeWrapper(LLMClientWrapper):
             if msg.attachment is not None:
                 converted_messages[-1]["content"].append(process_image_claude(msg.attachment))
 
-        # Calculate cumulative token counts to find optimal cache breakpoint
-        # Strategy: cache at second-to-last user message if cumulative >= MIN_CACHE_TOKENS
-        cumulative_tokens = self._estimate_tokens(system_text)
-
-        # Build cumulative token count per message
-        msg_cumulative = []
-        for msg in converted_messages:
-            msg_tokens = sum(self._estimate_tokens(c.get("text", "")) for c in msg["content"] if c.get("type") == "text")
-            cumulative_tokens += msg_tokens
-            msg_cumulative.append(cumulative_tokens)
-
-        # Find user message indices
-        user_indices = [i for i, m in enumerate(converted_messages) if m["role"] == "user"]
-
-        # Place cache_control on second-to-last user message if cumulative there >= MIN_CACHE_TOKENS
-        breakpoint_idx = None
-        if len(user_indices) >= 2:
-            second_to_last = user_indices[-2]
-            if msg_cumulative[second_to_last] >= self.MIN_CACHE_TOKENS:
-                breakpoint_idx = second_to_last
-
-        if breakpoint_idx is not None:
-            last_content = converted_messages[breakpoint_idx]["content"][-1]
-            last_content["cache_control"] = {"type": "ephemeral"}
-            logger.info(f"Cache breakpoint at msg {breakpoint_idx}, ~{msg_cumulative[breakpoint_idx]} tokens (min: {self.MIN_CACHE_TOKENS})")
-        elif system_content and self._estimate_tokens(system_text) >= self.MIN_CACHE_TOKENS:
-            # System prompt alone is long enough
-            system_content[0]["cache_control"] = {"type": "ephemeral"}
-            logger.info(f"Cache breakpoint at system prompt, ~{self._estimate_tokens(system_text)} tokens")
-        else:
-            # Log why caching isn't active yet
-            total_tokens = msg_cumulative[-1] if msg_cumulative else self._estimate_tokens(system_text)
-            logger.info(
-                f"Cache not active: {len(user_indices)} user msgs, ~{total_tokens} tokens "
-                f"(need 2+ msgs and {self.MIN_CACHE_TOKENS}+ tokens at second-to-last)"
-            )
+        # Always cache the system prompt - it's the only stable content
+        # (User messages change as history slides, breaking cache prefix)
+        if system_content:
+            system_tokens = self._estimate_tokens(system_text)
+            if system_tokens >= self.MIN_CACHE_TOKENS:
+                system_content[0]["cache_control"] = {"type": "ephemeral"}
+                logger.info(f"Cache breakpoint at system prompt, ~{system_tokens} tokens")
+            else:
+                logger.info(f"System prompt too short for caching: ~{system_tokens} tokens (min: {self.MIN_CACHE_TOKENS})")
 
         return system_content, converted_messages
 
