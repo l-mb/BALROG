@@ -1,0 +1,8 @@
+{% for agent in agents %}
+<option value="{{ agent.worker_id }}" {% if agent.worker_id == selected %}selected{% endif %}>
+  {{ agent.worker_id }} (ep{{ agent.episode }}:{{ agent.step }})
+</option>
+{% endfor %}
+{% if not agents %}
+<option value="">No agents found</option>
+{% endif %}

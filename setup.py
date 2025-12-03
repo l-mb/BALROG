@@ -50,7 +50,12 @@ setup(
             "flake8",
             "pre-commit",
             "twine",
-        ]
+        ],
+        "monitor": [
+            "starlette",
+            "uvicorn",
+            "jinja2",
+        ],
     },
     package_dir={"": "./"},
     packages=setuptools.find_packages(where="./", include=["balrog*"]),

@@ -1,13 +1,13 @@
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any
 
 from balrog.agents.base import BaseAgent
 from balrog.client import LLMResponse
 
-from .journal import BraidJournal
-from .memory import FileMemoryBackend, MemoryEntry, MemoryScope
+from .storage import BraidStorage, MemoryEntry, MemoryScope
 
 
 class BRAIDAgent(BaseAgent):
@@ -43,36 +43,31 @@ EFFICIENCY: content/tags for agent only - abbreviate freely, as terse as possibl
     def __init__(self, client_factory: Any, prompt_builder: Any, config: Any):
         super().__init__(client_factory, prompt_builder)
         self.config = config
-
-        num_workers = config.eval.get("num_workers", 1)
-        if num_workers > 1:
-            raise ValueError(
-                f"BRAIDAgent with FileMemoryBackend requires eval.num_workers=1 (got {num_workers}). "
-                "Parallel workers would corrupt shared JSON storage and episode numbering."
-            )
-
         braid_cfg = config.agent.braid
-        self.memory = FileMemoryBackend(Path(braid_cfg.persistent_memory_path))
-        self.max_memory_context = braid_cfg.get("max_persistent_context", 40)
-        self.episode_number = self.memory.max_episode()
-        self._enabled_labels: set[str] | None = None  # None = all labels enabled
 
-        # Override history limit if specified in braid config
+        # Initialize unified storage (SQLite with WAL for multi-worker support)
+        self.storage = BraidStorage(Path(braid_cfg.db_path))
+        self.max_memory_context = braid_cfg.get("max_persistent_context", 40)
+        self.episode_number = self.storage.max_episode()
+        self._enabled_labels: set[str] | None = None
+
+        # Override history limit if specified
         if "max_text_history" in braid_cfg:
             self.prompt_builder.max_text_history = braid_cfg.max_text_history
 
-        # Initialize journal for debugging/monitoring
-        journal_path = braid_cfg.get("journal_path")
-        log_full_prompt = braid_cfg.get("journal_full_prompt", False)
-        self._journal_memory_details = braid_cfg.get("journal_memory_details", False)
-        self.journal = BraidJournal(
-            path=journal_path,
-            enabled=journal_path is not None,
-            log_full_prompt=log_full_prompt,
-        )
-        self.journal.set_episode(self.episode_number)
+        # Journal config
+        self._log_full_prompt = braid_cfg.get("log_full_prompt", False)
+        self._log_memory_details = braid_cfg.get("log_memory_details", False)
 
-        # Track memory update counts and details for journal
+        # Step and token tracking (storage is stateless)
+        self._step = 0
+        self._request_start: float | None = None
+        self._cumulative_input_tokens = 0
+        self._cumulative_output_tokens = 0
+        self._episode_input_tokens = 0
+        self._episode_output_tokens = 0
+
+        # Track memory update counts and details
         self._mem_adds = 0
         self._mem_removes = 0
         self._label_changes = False
@@ -85,22 +80,19 @@ EFFICIENCY: content/tags for agent only - abbreviate freely, as terse as possibl
 
     def _extract_screen(self, obs: dict[str, Any]) -> str | None:
         """Extract ASCII screen from observation (NetHack tty_chars)."""
-        # Try to get tty_chars from various observation structures
-        tty_chars = obs.get("tty_chars")
+        tty_chars = None
+        # NLE wraps raw observation in obs["obs"]
+        raw_obs = obs.get("obs")
+        if isinstance(raw_obs, dict):
+            tty_chars = raw_obs.get("tty_chars")
+        # Fallback: check top level
         if tty_chars is None:
-            # May be nested under "text" or similar
-            text_obs = obs.get("text", {})
-            if isinstance(text_obs, dict):
-                tty_chars = text_obs.get("tty_chars")
+            tty_chars = obs.get("tty_chars")
         if tty_chars is None:
             return None
-        # Render as ASCII string
         try:
             rows, cols = tty_chars.shape
-            lines = []
-            for i in range(rows):
-                line = "".join(chr(tty_chars[i, j]) for j in range(cols))
-                lines.append(line)
+            lines = ["".join(chr(tty_chars[i, j]) for j in range(cols)) for i in range(rows)]
             return "\n".join(lines)
         except (AttributeError, TypeError):
             return None
@@ -115,30 +107,36 @@ EFFICIENCY: content/tags for agent only - abbreviate freely, as terse as possibl
         if messages:
             messages[-1].content = self._build_enhanced_prompt(messages[-1].content)
 
-        # Log screen if available (before request for context)
+        # Increment step and start timing
+        self._step += 1
+        self._request_start = time.perf_counter()
+
+        # Log screen if available
         screen = self._extract_screen(obs)
         if screen:
-            self.journal.log_screen(screen)
+            self.storage.log_screen(self.episode_number, self._step, screen)
 
-        # Extract observation text for journal
+        # Log request
+        prompt_chars = sum(len(getattr(m, "content", str(m))) for m in messages)
         obs_text = obs.get("text", {}).get("short_term_context", "")
-        self.journal.log_request_start(messages, observation_text=obs_text)
+        full_prompt = None
+        if self._log_full_prompt:
+            full_prompt = [{"role": getattr(m, "role", "unknown"), "content": getattr(m, "content", str(m))} for m in messages]
+        self.storage.log_request(
+            self.episode_number, self._step, len(messages), prompt_chars, obs_text, full_prompt
+        )
 
         response = self.client.generate(messages)
         return self._parse_response(response)
 
     def _build_enhanced_prompt(self, current_content: str) -> str:
-        """Build prompt optimized for cache hits and minimal queries.
-
-        Order: persistent (stable) → episode (per-episode) → labels → observation
-        """
+        """Build prompt optimized for cache hits and minimal queries."""
         sections = []
 
-        # Retrieve entries for each scope
-        p_entries = self.memory.retrieve(
+        p_entries = self.storage.retrieve(
             tags=self._enabled_labels, scope=MemoryScope.PERSISTENT, limit=self.max_memory_context
         )
-        e_entries = self.memory.retrieve(
+        e_entries = self.storage.retrieve(
             tags=self._enabled_labels, scope=MemoryScope.EPISODE,
             episode=self.episode_number, limit=self.max_memory_context
         )
@@ -146,9 +144,8 @@ EFFICIENCY: content/tags for agent only - abbreviate freely, as terse as possibl
         if p_entries:
             lines = [f"[{e.entry_id}] (prio:{e.priority}) (tags: {e.tags}) {e.content}" for e in p_entries]
             header = f"PERSISTENT ({len(p_entries)}"
-            # Only count hidden if we hit the limit
             if len(p_entries) >= self.max_memory_context:
-                total = self.memory.count(tags=self._enabled_labels, scope=MemoryScope.PERSISTENT)
+                total = self.storage.count(tags=self._enabled_labels, scope=MemoryScope.PERSISTENT)
                 hidden = total - len(p_entries)
                 if hidden > 0:
                     header += f"+{hidden} hidden due to limit"
@@ -159,7 +156,7 @@ EFFICIENCY: content/tags for agent only - abbreviate freely, as terse as possibl
             lines = [f"[{e.entry_id}] (prio:{e.priority}) (tags: {e.tags}) {e.content}" for e in e_entries]
             header = f"EPISODE ({len(e_entries)}"
             if len(e_entries) >= self.max_memory_context:
-                total = self.memory.count(
+                total = self.storage.count(
                     tags=self._enabled_labels, scope=MemoryScope.EPISODE, episode=self.episode_number
                 )
                 hidden = total - len(e_entries)
@@ -168,7 +165,6 @@ EFFICIENCY: content/tags for agent only - abbreviate freely, as terse as possibl
             header += "):"
             sections.append(f"{header}\n" + "\n".join(lines))
 
-        # Compute label stats from already-retrieved entries (no extra queries)
         label_info = self._compute_label_summary(p_entries + e_entries)
         if label_info:
             sections.append(label_info)
@@ -179,10 +175,9 @@ EFFICIENCY: content/tags for agent only - abbreviate freely, as terse as possibl
         return "\n\n".join(sections)
 
     def _compute_label_summary(self, entries: list[MemoryEntry]) -> str:
-        """Compute label summary from already-retrieved entries (no extra queries)."""
+        """Compute label summary from already-retrieved entries."""
         if not entries:
             return ""
-        # Count tags from retrieved entries
         tag_counts: dict[str, int] = {}
         for e in entries:
             for tag in e.tags.split(","):
@@ -206,11 +201,19 @@ EFFICIENCY: content/tags for agent only - abbreviate freely, as terse as possibl
 
     def _parse_response(self, response: LLMResponse) -> LLMResponse:
         completion = response.completion
+        elapsed = time.perf_counter() - self._request_start if self._request_start else 0
+        self._request_start = None
+
+        # Update token counters
+        self._cumulative_input_tokens += response.input_tokens
+        self._cumulative_output_tokens += response.output_tokens
+        self._episode_input_tokens += response.input_tokens
+        self._episode_output_tokens += response.output_tokens
 
         think_match = re.search(r"<think>(.*?)</think>", completion, re.DOTALL)
         reasoning = think_match.group(1).strip() if think_match else None
 
-        # Reset memory update counters and details
+        # Reset memory update counters
         self._mem_adds = 0
         self._mem_removes = 0
         self._label_changes = False
@@ -227,19 +230,30 @@ EFFICIENCY: content/tags for agent only - abbreviate freely, as terse as possibl
         if reasoning:
             self.prompt_builder.update_reasoning(reasoning)
 
-        # Log response to journal
-        self.journal.log_response(
+        # Log response
+        self.storage.log_response(
+            episode=self.episode_number,
+            step=self._step,
             action=action,
+            latency_ms=int(elapsed * 1000),
             input_tokens=response.input_tokens,
             output_tokens=response.output_tokens,
+            ep_input_tokens=self._episode_input_tokens,
+            ep_output_tokens=self._episode_output_tokens,
+            total_input_tokens=self._cumulative_input_tokens,
+            total_output_tokens=self._cumulative_output_tokens,
             reasoning=reasoning,
         )
-        self.journal.log_memory_update(
+
+        # Log memory updates
+        self.storage.log_memory_update(
+            episode=self.episode_number,
+            step=self._step,
             adds=self._mem_adds,
             removes=self._mem_removes,
             label_changes=self._label_changes,
-            added_entries=self._added_entries if self._journal_memory_details else None,
-            removed_ids=self._removed_ids if self._journal_memory_details else None,
+            added_entries=self._added_entries if self._log_memory_details else None,
+            removed_ids=self._removed_ids if self._log_memory_details else None,
         )
 
         return response._replace(reasoning=reasoning or completion, completion=action)
@@ -275,7 +289,7 @@ EFFICIENCY: content/tags for agent only - abbreviate freely, as terse as possibl
 
                     scope = MemoryScope.EPISODE if scope_str == "episode" else MemoryScope.PERSISTENT
 
-                    entry_id = self.memory.store(
+                    entry_id = self.storage.store(
                         MemoryEntry(
                             tags=tags,
                             content=content,
@@ -285,7 +299,7 @@ EFFICIENCY: content/tags for agent only - abbreviate freely, as terse as possibl
                         )
                     )
                     self._mem_adds += 1
-                    if self._journal_memory_details:
+                    if self._log_memory_details:
                         self._added_entries.append({
                             "id": entry_id,
                             "scope": scope_str,
@@ -294,21 +308,21 @@ EFFICIENCY: content/tags for agent only - abbreviate freely, as terse as possibl
                             "content": content,
                         })
             except (json.JSONDecodeError, ValueError):
-                self.journal.log_error("Failed to parse memory additions")
+                self.storage.log_error(self.episode_number, self._step, "Failed to parse memory additions")
 
-        # Parse removals (by ID)
+        # Parse removals
         remove_match = re.search(r"remove:\s*\[(.+?)\]", mem_text, re.DOTALL)
         if remove_match:
             try:
                 removals = json.loads(f"[{remove_match.group(1)}]")
                 for entry_id in removals:
                     if isinstance(entry_id, str):
-                        self.memory.remove(entry_id)
+                        self.storage.remove(entry_id)
                         self._mem_removes += 1
-                        if self._journal_memory_details:
+                        if self._log_memory_details:
                             self._removed_ids.append(entry_id)
             except json.JSONDecodeError:
-                self.journal.log_error("Failed to parse memory removals")
+                self.storage.log_error(self.episode_number, self._step, "Failed to parse memory removals")
 
         # Parse enable_labels
         enable_match = re.search(r"enable_labels:\s*\[(.+?)\]", mem_text, re.DOTALL)
@@ -317,14 +331,11 @@ EFFICIENCY: content/tags for agent only - abbreviate freely, as terse as possibl
                 labels = json.loads(f"[{enable_match.group(1)}]")
                 labels = {str(lbl).lower().strip() for lbl in labels if isinstance(lbl, str)}
                 if labels:
-                    if self._enabled_labels is None:
-                        # Already all enabled, just stay that way
-                        pass
-                    else:
+                    if self._enabled_labels is not None:
                         self._enabled_labels |= labels
                     self._label_changes = True
             except json.JSONDecodeError:
-                self.journal.log_error("Failed to parse enable_labels")
+                self.storage.log_error(self.episode_number, self._step, "Failed to parse enable_labels")
 
         # Parse disable_labels
         disable_match = re.search(r"disable_labels:\s*\[(.+?)\]", mem_text, re.DOTALL)
@@ -334,14 +345,13 @@ EFFICIENCY: content/tags for agent only - abbreviate freely, as terse as possibl
                 labels = {str(lbl).lower().strip() for lbl in labels if isinstance(lbl, str)}
                 if labels:
                     if self._enabled_labels is None:
-                        # First disable: enable everything except these
-                        all_tags = self.memory.all_tags()
+                        all_tags = self.storage.all_tags()
                         self._enabled_labels = all_tags - labels
                     else:
                         self._enabled_labels -= labels
                     self._label_changes = True
             except json.JSONDecodeError:
-                self.journal.log_error("Failed to parse disable_labels")
+                self.storage.log_error(self.episode_number, self._step, "Failed to parse disable_labels")
 
         # Parse reset_labels
         reset_match = re.search(r"reset_labels:\s*(true|false)", mem_text, re.IGNORECASE)
@@ -350,8 +360,11 @@ EFFICIENCY: content/tags for agent only - abbreviate freely, as terse as possibl
             self._label_changes = True
 
     def reset(self) -> None:
-        """Reset for new episode. Episode memories and label filters reset."""
+        """Reset for new episode."""
         super().reset()
         self.episode_number += 1
-        self._enabled_labels = None  # Reset label filter each episode
-        self.journal.reset_episode(self.episode_number)
+        self._step = 0
+        self._enabled_labels = None
+        self._episode_input_tokens = 0
+        self._episode_output_tokens = 0
+        self.storage.log_reset(self.episode_number)

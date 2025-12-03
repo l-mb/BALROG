@@ -7,12 +7,11 @@ agent:
   max_icl_history: 1000   # Maximum number of ICL steps to keep in history (if using 'few_shot' type of agent)
   cache_icl: False
   braid:                 # BRAID agent settings (if using 'braid' type)
-    persistent_memory_path: "memory/nethack_knowledge.json"
-    max_persistent_context: 10  # Reduced for token efficiency
+    db_path: "memory/braid.db"  # SQLite database for memory + journal
+    max_persistent_context: 10  # Max memory entries to include in prompt
     max_text_history: 4         # Override: BRAID uses memory instead of long history
-    journal_path: "memory/braid_journal.jsonl"  # Set to null to disable journaling
-    journal_full_prompt: false  # Log full LLM prompts (large, for debugging)
-    journal_memory_details: false  # Log what was added/removed in memory updates
+    log_full_prompt: false      # Log full LLM prompts (large, for debugging)
+    log_memory_details: false   # Log what was added/removed in memory updates
 
 eval:
   output_dir: "results"  # Directory where evaluation results will be saved

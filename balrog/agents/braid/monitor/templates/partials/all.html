@@ -1,0 +1,110 @@
+<div class="layout" data-max-step="{{ max_step }}" data-current-step="{{ current_step if current_step else '' }}">
+  <!-- Top row: Screen + Stats -->
+  <div class="top-row">
+    <!-- Screen -->
+    <article class="screen-panel">
+      <header>Screen</header>
+      {% if screen %}
+      <pre class="screen">{{ screen }}</pre>
+      {% else %}
+      <p class="muted">No screen data (only available for NLE/MiniHack)</p>
+      {% endif %}
+    </article>
+
+    <!-- Stats -->
+    <article class="stats-panel">
+      <header>Stats</header>
+      {% if stats %}
+      <dl>
+        <dt>Episode</dt>
+        <dd>{{ stats.episode }}</dd>
+        <dt>Step</dt>
+        <dd>{{ stats.step }}</dd>
+        <dt>Tokens In</dt>
+        <dd>{{ "{:,}".format(stats.total_in_tokens) }}</dd>
+        <dt>Tokens Out</dt>
+        <dd>{{ "{:,}".format(stats.total_out_tokens) }}</dd>
+        <dt>Avg Latency</dt>
+        <dd>{{ "{:.1f}".format(stats.avg_latency_ms / 1000) }}s</dd>
+      </dl>
+      {% else %}
+      <p class="muted">No stats</p>
+      {% endif %}
+    </article>
+  </div>
+
+  <!-- Memory (full width) -->
+  <article class="memory-panel">
+    <header>
+      <span>Memory ({{ entries|length }} entries{% if show_deleted %}, {{ entries|selectattr('deleted')|list|length }} deleted{% endif %})</span>
+      <div class="memory-controls">
+        <select class="memory-scope-select"
+                onchange="updateMemoryFilter()">
+          <option value="all" {% if memory_scope == 'all' %}selected{% endif %}>All</option>
+          <option value="persistent" {% if memory_scope == 'persistent' %}selected{% endif %}>Persistent</option>
+          <option value="episode" {% if memory_scope == 'episode' %}selected{% endif %}>Episode</option>
+        </select>
+        <label class="memory-deleted-toggle">
+          <input type="checkbox" {% if show_deleted %}checked{% endif %}
+                 onchange="updateMemoryFilter()">
+          Deleted
+        </label>
+      </div>
+    </header>
+    <div class="memory-list">
+      {% if entries %}
+      <table>
+        <thead>
+          <tr>
+            <th class="col-id">ID</th>
+            <th class="col-prio">P</th>
+            <th class="col-tags">Tags</th>
+            <th class="col-content">Content</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for e in entries %}
+          <tr{% if e.deleted %} class="deleted-entry"{% endif %}>
+            <td class="col-id"><code>{{ e.id[:6] }}</code></td>
+            <td class="col-prio">{{ e.priority }}</td>
+            <td class="col-tags">{{ e.scope[:1] }} {{ e.tags }}</td>
+            <td class="col-content">{{ e.content }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="muted">No memory entries</p>
+      {% endif %}
+    </div>
+  </article>
+
+  <!-- Action History (full width) -->
+  <article class="history-panel">
+    <header>Action History ({{ responses|length if responses else 0 }} actions)</header>
+    <div class="history-list">
+      {% if responses and responses|length > 0 %}
+      <table class="history-table">
+        <thead>
+          <tr>
+            <th class="col-step">Step</th>
+            <th class="col-action">Action</th>
+            <th class="col-reasoning">Reasoning</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in responses %}
+          <tr>
+            <td class="col-step">{{ r.step }}</td>
+            <td class="col-action"><code>{{ r.action|default('?', true) }}</code></td>
+            <td class="col-reasoning"><pre>{{ r.reasoning if r.reasoning else "(no reasoning)" }}</pre></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="muted">No actions yet</p>
+      {% endif %}
+    </div>
+  </article>
+</div>

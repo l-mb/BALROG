@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BRAID Monitor</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="container-fluid">
+    <nav>
+      <ul>
+        <li><strong>BRAID Monitor</strong></li>
+      </ul>
+      <ul>
+        <li>
+          <select id="agent-select" name="agent"
+                  hx-get="/partials/all/{value}"
+                  hx-trigger="change"
+                  hx-target="#panels"
+                  hx-swap="innerHTML"
+                  onchange="this.setAttribute('hx-get', '/partials/all/' + this.value); htmx.trigger(this, 'change')">
+            {% for agent in agents %}
+            <option value="{{ agent.worker_id }}" {% if agent.worker_id == selected %}selected{% endif %}>
+              {{ agent.worker_id }} (ep{{ agent.episode }}:{{ agent.step }})
+            </option>
+            {% endfor %}
+            {% if not agents %}
+            <option value="">No agents found</option>
+            {% endif %}
+          </select>
+        </li>
+        <li>
+          <label>
+            <input type="checkbox" id="autorefresh" checked
+                   onchange="toggleAutoRefresh(this.checked)">
+            Auto-refresh
+          </label>
+        </li>
+        <li id="step-nav" class="step-nav hidden">
+          <button onclick="stepNav(-10)" title="-10 steps">&laquo;</button>
+          <button onclick="stepNav(-1)" title="-1 step">&lsaquo;</button>
+          <span id="step-display">-/-</span>
+          <button onclick="stepNav(1)" title="+1 step">&rsaquo;</button>
+          <button onclick="stepNav(10)" title="+10 steps">&raquo;</button>
+          <button id="play-btn" onclick="togglePlayback()" title="Play/Pause">&#9654;</button>
+          <button onclick="stepNav(Infinity)" title="Latest">Latest</button>
+        </li>
+      </ul>
+    </nav>
+  </header>
+
+  <main class="container-fluid">
+    <div id="panels"
+         hx-get="/partials/all/{{ selected }}"
+         hx-trigger="load, every 500ms"
+         hx-swap="innerHTML">
+      <!-- Panels loaded via htmx -->
+    </div>
+  </main>
+
+  <script>
+    // Preserve scroll positions across htmx swaps
+    let scrollPositions = {};
+
+    document.body.addEventListener('htmx:beforeSwap', function(evt) {
+      // Save scroll positions of scrollable elements
+      document.querySelectorAll('.history-list, .memory-list').forEach(el => {
+        const id = el.className;
+        scrollPositions[id] = el.scrollTop;
+      });
+    });
+
+    document.body.addEventListener('htmx:afterSwap', function(evt) {
+      // Restore scroll positions
+      document.querySelectorAll('.history-list, .memory-list').forEach(el => {
+        const id = el.className;
+        if (scrollPositions[id] !== undefined) {
+          el.scrollTop = scrollPositions[id];
+        }
+      });
+    });
+
+    // Step navigation state
+    let currentStep = null;  // null = latest
+    let maxStep = 0;
+
+    function toggleAutoRefresh(enabled) {
+      const panels = document.getElementById('panels');
+      const stepNavEl = document.getElementById('step-nav');
+      if (enabled) {
+        stopPlayback();
+        panels.setAttribute('hx-trigger', 'load, every 500ms');
+        stepNavEl.classList.add('hidden');
+        currentStep = null;
+        updatePanelsUrl();
+      } else {
+        panels.setAttribute('hx-trigger', 'load');
+        stepNavEl.classList.remove('hidden');
+      }
+      htmx.process(panels);
+    }
+
+    function stepNav(delta, fromPlayback = false) {
+      // Stop playback on manual navigation
+      if (!fromPlayback && playbackInterval) {
+        stopPlayback();
+      }
+
+      if (delta === Infinity) {
+        currentStep = null;  // Go to latest
+      } else {
+        if (currentStep === null) {
+          currentStep = maxStep;
+        }
+        currentStep = Math.max(1, Math.min(maxStep, currentStep + delta));
+      }
+      updatePanelsUrl();
+      // Trigger immediate refresh
+      const panels = document.getElementById('panels');
+      htmx.trigger(panels, 'load');
+    }
+
+    function updateStepDisplay() {
+      const display = document.getElementById('step-display');
+      if (display) {
+        if (currentStep === null) {
+          display.textContent = `${maxStep}/${maxStep} (live)`;
+        } else {
+          display.textContent = `${currentStep}/${maxStep}`;
+        }
+      }
+    }
+
+    // Playback state
+    let playbackInterval = null;
+
+    function togglePlayback() {
+      if (playbackInterval) {
+        stopPlayback();
+      } else {
+        startPlayback();
+      }
+    }
+
+    function startPlayback() {
+      const btn = document.getElementById('play-btn');
+      if (btn) btn.innerHTML = '&#9724;';  // Pause symbol (square)
+
+      // If at latest, start from beginning
+      if (currentStep === null || currentStep >= maxStep) {
+        currentStep = 1;
+        updatePanelsUrl();
+      }
+
+      playbackInterval = setInterval(() => {
+        if (currentStep === null || currentStep >= maxStep) {
+          stopPlayback();
+          return;
+        }
+        stepNav(1, true);
+      }, 500);
+    }
+
+    function stopPlayback() {
+      if (playbackInterval) {
+        clearInterval(playbackInterval);
+        playbackInterval = null;
+      }
+      const btn = document.getElementById('play-btn');
+      if (btn) btn.innerHTML = '&#9654;';  // Play symbol (triangle)
+    }
+
+    // Update dropdown to reflect selected agent on page load
+    document.getElementById('agent-select').addEventListener('change', function() {
+      const url = new URL(window.location);
+      url.searchParams.set('agent', this.value);
+      window.history.replaceState({}, '', url);
+    });
+
+    // Memory filter state
+    let memoryScope = 'all';
+    let showDeleted = false;
+
+    // Interaction pause - prevent refresh during user interaction
+    let interactionPauseUntil = 0;
+    const INTERACTION_PAUSE_MS = 2000;
+
+    function pauseRefresh() {
+      interactionPauseUntil = Date.now() + INTERACTION_PAUSE_MS;
+    }
+
+    // Block htmx requests while user is interacting
+    document.body.addEventListener('htmx:beforeRequest', function(evt) {
+      if (Date.now() < interactionPauseUntil) {
+        evt.preventDefault();
+      }
+    });
+
+    function updateMemoryFilter() {
+      const scopeSelect = document.querySelector('.memory-scope-select');
+      const deletedCheckbox = document.querySelector('.memory-deleted-toggle input');
+      if (scopeSelect) memoryScope = scopeSelect.value;
+      if (deletedCheckbox) showDeleted = deletedCheckbox.checked;
+      updatePanelsUrl();
+    }
+
+    function updatePanelsUrl() {
+      const panels = document.getElementById('panels');
+      const baseUrl = panels.getAttribute('hx-get').split('?')[0];
+      const params = new URLSearchParams();
+      if (memoryScope !== 'all') params.set('scope', memoryScope);
+      if (showDeleted) params.set('deleted', '1');
+      if (currentStep !== null) params.set('step', currentStep.toString());
+      const newUrl = params.toString() ? `${baseUrl}?${params}` : baseUrl;
+      panels.setAttribute('hx-get', newUrl);
+      htmx.process(panels);
+    }
+
+    // Pause refresh when interacting with controls or scrollable areas
+    document.body.addEventListener('focusin', function(evt) {
+      if (evt.target.closest('.memory-controls, #agent-select')) {
+        pauseRefresh();
+      }
+    });
+
+    document.body.addEventListener('mousedown', function(evt) {
+      if (evt.target.closest('.memory-controls, .col-reasoning, .history-list, .memory-list')) {
+        pauseRefresh();
+      }
+    });
+
+    document.body.addEventListener('scroll', function(evt) {
+      if (evt.target.closest && evt.target.closest('.col-reasoning, .history-list, .memory-list')) {
+        pauseRefresh();
+      }
+    }, true);
+
+    document.body.addEventListener('wheel', function(evt) {
+      if (evt.target.closest('.col-reasoning, .history-list, .memory-list')) {
+        pauseRefresh();
+      }
+    }, true);
+
+    // Restore state after swap and update step info
+    document.body.addEventListener('htmx:afterSwap', function(evt) {
+      // Restore memory filter state
+      const scopeSelect = document.querySelector('.memory-scope-select');
+      const deletedCheckbox = document.querySelector('.memory-deleted-toggle input');
+      if (scopeSelect && memoryScope) scopeSelect.value = memoryScope;
+      if (deletedCheckbox) deletedCheckbox.checked = showDeleted;
+
+      // Update step navigation state from response
+      const layout = document.querySelector('.layout');
+      if (layout) {
+        const newMaxStep = parseInt(layout.dataset.maxStep) || 0;
+        if (newMaxStep > maxStep) {
+          maxStep = newMaxStep;
+        }
+        // Only update maxStep to larger values (agent progressed)
+        // If in live mode, always track latest
+        if (currentStep === null) {
+          maxStep = newMaxStep;
+        }
+      }
+      updateStepDisplay();
+    });
+  </script>
+</body>
+</html>

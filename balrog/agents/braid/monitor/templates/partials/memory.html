@@ -1,0 +1,26 @@
+{% if entries %}
+<table>
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Scope</th>
+      <th>Prio</th>
+      <th>Tags</th>
+      <th>Content</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for e in entries %}
+    <tr>
+      <td><code>{{ e.id[:8] }}</code></td>
+      <td>{{ e.scope[:3] }}</td>
+      <td>{{ e.priority }}</td>
+      <td><small>{{ e.tags }}</small></td>
+      <td class="content-cell">{{ e.content[:100] }}{% if e.content|length > 100 %}...{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No memory entries</p>
+{% endif %}
