@@ -24,6 +24,10 @@
         <dd>{{ "{:,}".format(stats.total_in_tokens) }}</dd>
         <dt>Tokens Out</dt>
         <dd>{{ "{:,}".format(stats.total_out_tokens) }}</dd>
+        <dt>Cache Read</dt>
+        <dd>{{ "{:,}".format(stats.cache_read_tokens) }}{% if stats.total_in_tokens %} ({{ "{:.0f}".format(100 * stats.cache_read_tokens / stats.total_in_tokens) }}%){% endif %}</dd>
+        <dt>Cache Create</dt>
+        <dd>{{ "{:,}".format(stats.cache_create_tokens) }}</dd>
         <dt>Avg Latency</dt>
         <dd>{{ "{:.1f}".format(stats.avg_latency_ms / 1000) }}s</dd>
       </dl>

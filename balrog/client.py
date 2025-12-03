@@ -1,10 +1,6 @@
 import base64
-import datetime
 import logging
 import time
-import json
-import csv
-import os
 from collections import namedtuple
 from io import BytesIO
 
@@ -23,7 +19,10 @@ LLMResponse = namedtuple(
         "input_tokens",
         "output_tokens",
         "reasoning",
+        "cache_creation_tokens",
+        "cache_read_tokens",
     ],
+    defaults=[0, 0],  # Default cache tokens to 0 for non-Anthropic clients
 )
 
 httpx_logger = logging.getLogger("httpx")
@@ -392,7 +391,7 @@ class GoogleGenerativeAIWrapper(LLMClientWrapper):
 
 
 class ClaudeWrapper(LLMClientWrapper):
-    """Wrapper for interacting with Anthropic's Claude API."""
+    """Wrapper for interacting with Anthropic's Claude API with prompt caching."""
 
     def __init__(self, client_config):
         """Initialize the ClaudeWrapper with the given configuration.
@@ -409,26 +408,87 @@ class ClaudeWrapper(LLMClientWrapper):
             self.client = Anthropic()
             self._initialized = True
 
+    def _get_extra_headers(self) -> dict[str, str]:
+        """Get extra headers for prompt caching."""
+        return {"anthropic-beta": "prompt-caching-2024-07-31"}
+
+    # Minimum tokens required for caching (conservative: use Haiku's 2048)
+    MIN_CACHE_TOKENS = 2048
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Rough token estimate: ~4 chars per token for English."""
+        return len(text) // 4
+
     def convert_messages(self, messages):
-        """Convert messages to the format expected by the Claude API.
+        """Convert messages to the format expected by the Claude API with caching.
+
+        Extracts system messages for the system parameter and adds cache_control
+        markers to optimize prompt caching. Only adds cache_control when content
+        exceeds the minimum token threshold (2048 for Haiku, 1024 for Sonnet).
 
         Args:
             messages (list): A list of message objects.
 
         Returns:
-            list: A list of messages formatted for the Claude API.
+            tuple: (system_content, converted_messages) where system_content is
+                   the system prompt with cache_control, and converted_messages
+                   is the list of user/assistant messages.
         """
+        system_content = None
+        system_text = ""
         converted_messages = []
+
         for msg in messages:
-            converted_messages.append({"role": msg.role, "content": [{"type": "text", "text": msg.content}]})
-            if converted_messages[-1]["role"] == "system":
-                # Claude doesn't support system prompt and requires alternating roles
-                converted_messages[-1]["role"] = "user"
-                converted_messages.append({"role": "assistant", "content": "I'm ready!"})
+            content_block = {"type": "text", "text": msg.content}
+
+            if msg.role == "system":
+                system_text = msg.content
+                system_content = [content_block]  # Don't add cache_control yet
+                continue
+
+            converted_messages.append({"role": msg.role, "content": [content_block]})
+
             if msg.attachment is not None:
                 converted_messages[-1]["content"].append(process_image_claude(msg.attachment))
 
-        return converted_messages
+        # Calculate cumulative token counts to find optimal cache breakpoint
+        # Strategy: cache at second-to-last user message if cumulative >= MIN_CACHE_TOKENS
+        cumulative_tokens = self._estimate_tokens(system_text)
+
+        # Build cumulative token count per message
+        msg_cumulative = []
+        for msg in converted_messages:
+            msg_tokens = sum(self._estimate_tokens(c.get("text", "")) for c in msg["content"] if c.get("type") == "text")
+            cumulative_tokens += msg_tokens
+            msg_cumulative.append(cumulative_tokens)
+
+        # Find user message indices
+        user_indices = [i for i, m in enumerate(converted_messages) if m["role"] == "user"]
+
+        # Place cache_control on second-to-last user message if cumulative there >= MIN_CACHE_TOKENS
+        breakpoint_idx = None
+        if len(user_indices) >= 2:
+            second_to_last = user_indices[-2]
+            if msg_cumulative[second_to_last] >= self.MIN_CACHE_TOKENS:
+                breakpoint_idx = second_to_last
+
+        if breakpoint_idx is not None:
+            last_content = converted_messages[breakpoint_idx]["content"][-1]
+            last_content["cache_control"] = {"type": "ephemeral"}
+            logger.info(f"Cache breakpoint at msg {breakpoint_idx}, ~{msg_cumulative[breakpoint_idx]} tokens (min: {self.MIN_CACHE_TOKENS})")
+        elif system_content and self._estimate_tokens(system_text) >= self.MIN_CACHE_TOKENS:
+            # System prompt alone is long enough
+            system_content[0]["cache_control"] = {"type": "ephemeral"}
+            logger.info(f"Cache breakpoint at system prompt, ~{self._estimate_tokens(system_text)} tokens")
+        else:
+            # Log why caching isn't active yet
+            total_tokens = msg_cumulative[-1] if msg_cumulative else self._estimate_tokens(system_text)
+            logger.info(
+                f"Cache not active: {len(user_indices)} user msgs, ~{total_tokens} tokens "
+                f"(need 2+ msgs and {self.MIN_CACHE_TOKENS}+ tokens at second-to-last)"
+            )
+
+        return system_content, converted_messages
 
     def generate(self, messages):
         """Generate a response from the Claude API given a list of messages.
@@ -440,7 +500,7 @@ class ClaudeWrapper(LLMClientWrapper):
             LLMResponse: The response from the Claude API.
         """
         self._initialize_client()
-        converted_messages = self.convert_messages(messages)
+        system_content, converted_messages = self.convert_messages(messages)
 
         def api_call():
             # Create kwargs for the API call
@@ -450,14 +510,30 @@ class ClaudeWrapper(LLMClientWrapper):
                 "max_tokens": self.client_kwargs.get("max_tokens", 1024),
             }
 
+            # Add system prompt with caching if present
+            if system_content:
+                api_kwargs["system"] = system_content
+
             # Only include temperature if it's not None
             temperature = self.client_kwargs.get("temperature")
             if temperature is not None:
                 api_kwargs["temperature"] = temperature
 
-            return self.client.messages.create(**api_kwargs)
+            return self.client.messages.create(**api_kwargs, extra_headers=self._get_extra_headers())
 
         response = self.execute_with_retries(api_call)
+
+        # Extract cache metrics from response
+        usage = response.usage
+        cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+
+        # Debug: log cache info and full usage object
+        logger.info(
+            f"Claude usage: {usage}, "
+            f"cache_create={cache_creation}, cache_read={cache_read}, "
+            f"msgs={len(converted_messages)}, has_system={system_content is not None}"
+        )
 
         return LLMResponse(
             model_id=self.model_id,
@@ -466,6 +542,8 @@ class ClaudeWrapper(LLMClientWrapper):
             input_tokens=response.usage.input_tokens,
             output_tokens=response.usage.output_tokens,
             reasoning=None,
+            cache_creation_tokens=cache_creation,
+            cache_read_tokens=cache_read,
         )
 
 

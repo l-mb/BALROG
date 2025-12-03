@@ -85,7 +85,7 @@ class HistoryPromptBuilder:
         messages = []
 
         if self.system_prompt and not icl_episodes:
-            messages.append(Message(role="user", content=self.system_prompt))
+            messages.append(Message(role="system", content=self.system_prompt))
 
         # Determine which text observations to include
         text_needed = self.max_text_history

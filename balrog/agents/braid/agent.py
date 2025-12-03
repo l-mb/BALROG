@@ -21,9 +21,77 @@ class BRAIDAgent(BaseAgent):
     """
 
     _SYSTEM_PROMPT_SUFFIX = """
+SOME MAP SYMBOLS:
+@=you >/<stairs .=floor #=corridor |/-=walls +=closed door '=open door
+{=fountain _=altar ^=trap Letters=monsters (lowercase weaker)
+0=boulder (push with direction) `=rock/statue $=gold )=weapon [=armor
+!=potion ?=scroll /=wand ==ring "=amulet (=tool *= gem/stone
+
+INCOMPLETE MONSTER THREATS BY LETTER:
+a=ant(giant) b=blob c=cockatrice(DEADLY touch!) d=dog/jackal e=eye(floating paralyze!)
+f=cat g=gremlin h=humanoid i=imp j=jelly k=kobold l=leprechaun(steals gold)
+m=mimic n=nymph(steals items!) o=orc p=piercer q=quadruped r=rodent s=spider
+t=trapper u=unicorn v=vortex w=worm x=xan/grid bug y=light z=zruty
+A=Angel B=Bat C=Centaur D=Dragon(VERY dangerous) E=Elemental F=Fungus/lichen
+G=Gnome H=Giant I=Invisible stalker J=Jabberwock K=Keystone Kop L=Lich(undead spellcaster)
+M=Mummy N=Naga O=Ogre P=Pudding Q=Quantum mechanic R=Rust monster(destroys armor!)
+S=Snake T=Troll(regenerates) U=Umber hulk V=Vampire W=Wraith X=Xorn Y=Yeti Z=Zombie
+@=human(shopkeeper,guard,priest,nurse) &=demon '=golem ;=sea monster :=lizard/newt
+
+SOME SAFE CORPSES: lichen, newt, jackal, kobold, orc, gnome, dwarf, floating eye(telepathy!), giants
+RISKY: tengu (can grant teleport control, poison resistance, but also teleportitis)
+DANGEROUS CORPSES: cockatrice(instant death), Medusa (stoning)
+NEVER EAT: anything you're unsure about. When in doubt, don't eat it. Could be rotten. Tinning helps.
+
+KEY STATUS EFFECTS:
+Hungry->Weak->Fainting->death. Eat before Weak. Conf=confused, Stun=stunned, Blind, Hallu=hallucinating
+Ill=sick(pray or cure), FoodPois=food poisoning(pray). Burdened/Stressed=carrying too much, Stoning=Eating lizard corpose, acidic monster, potion of acid, stone to flesh spell, successful prayer
+
+DUNGEON BRANCHES:
+Dungeons of Doom (main): levels 1-~26, goal is to descend
+Gnomish Mines: entrance ~lvl 2-4, has Minetown with shops, temples, perhaps better gear
+Sokoban: entrance ~lvl 5-9, puzzle branch with guaranteed useful items at end, can't move diagonally, solve carefully
+Oracle: ~lvl 5-9, can consult for sometimes useful tips (costs gold)
+Castle: ~lvl 25, has wand of wishing in chest
+Gehennom: below Castle, fire and demons, working toward Amulet
+
+KEY STRATEGIES:
+- Elbereth: engrave in dust (E then write "Elbereth"). Most monsters won't attack you on it.
+- Altar sacrifice: kill monsters, offer corpses on aligned altar for favor and gifts (artifact weapons!), risky at non-aligned altars
+- Price ID: in shops, base prices can reveal item identity (e.g., 300zm scroll = identify)
+- Priests: Giving them gold (between 200 to 400 times player level) can grant intrinsic protection
+- Wand testing: engrave letter with wand, message can reveal wand type
+- Fountain: quaff for random effects, dip for Excalibur if lawful with long sword
+- Stash: leave items on early levels to retrieve later
+- Pet: keep fed (throw food), can steal from shops, detects mimics/traps
+- Remember mimics exist
+- Monsters could be invisible
+- Tinning has beneficial effects
+- Magic markers should be blessed, have or create blessed scrolls of charging
+
+EARLY GAME PRIORITIES:
+1. Find and equip any armor/weapons
+2. Identify food sources, stockpile rations
+3. Find altar for sacrifice and alignment
+4. Don't over-explore - descend when level cleared
+5. Keep track of stairs up for retreat
+6. Improve player level, but don't outgrow your equipment / DPS, as monsters grow with your level
+
+COMMON MISTAKES TO AVOID:
+- Fighting when low HP instead of retreating
+- Eating unknown corpses (especially cockatrice!)
+- Most rings increase hunger
+- Praying too often (gods get angry, wait 800+ turns)
+- Attacking shopkeeper/temple priest (very dangerous)
+- Ignoring hunger until Fainting
+- Fighting multiple too strong enemies in open spaces
+- Forgetting where stairs up are located
+- Using unidentified wands pointed at self
+- Stepping on traps repeatedly (use search)
+
 RESPONSE FORMAT:
 1. Assess: THINKING_NEEDED: yes/no
-2. If yes: <think>your analysis</think>
+2. If yes: <think>your terse analysis, maximize signal to noise, optimize for your own use</think>
 3. Memory updates:
 <memory_updates>
 add: [{"scope": "episode|persistent", "tags": "t1,t2", "prio": 5, "content": "..."}]
@@ -37,7 +105,11 @@ MEMORY:
 - prio: 1-9, higher shown first when limit reached (default 5)
 - enable/disable_labels: filter what's shown; reset_labels: true to show all
 
-EFFICIENCY: content/tags for agent only - abbreviate freely, as terse as possible, disregard human readability
+HINTS FOR MEMORY USE:
+- content/tags exclusive for agent only - abbreviate freely, disregard human readability, encode as much information as possible, regardless of language used
+- Could use labels for specific levels, areas, monsters, puzzles, short- and long-term planning, risk tracking, specific to character role, ...
+- Use persistent memory to learn permanently and across runs, both tactically and strategically or meta attributes such as labelling strategy for memory, supplementing and overriding system prompt hints for play
+
 """.strip()
 
     def __init__(self, client_factory: Any, prompt_builder: Any, config: Any):
@@ -243,6 +315,8 @@ EFFICIENCY: content/tags for agent only - abbreviate freely, as terse as possibl
             total_input_tokens=self._cumulative_input_tokens,
             total_output_tokens=self._cumulative_output_tokens,
             reasoning=reasoning,
+            cache_creation_tokens=getattr(response, "cache_creation_tokens", 0) or 0,
+            cache_read_tokens=getattr(response, "cache_read_tokens", 0) or 0,
         )
 
         # Log memory updates

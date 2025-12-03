@@ -20,6 +20,8 @@ class AgentStats:
     total_in_tokens: int
     total_out_tokens: int
     avg_latency_ms: float
+    cache_read_tokens: int
+    cache_create_tokens: int
 
 
 @dataclass
@@ -148,7 +150,9 @@ class MonitorDB:
             """SELECT MAX(episode) as episode, MAX(step) as step,
                       SUM(json_extract(data, '$.in_tok')) as total_in,
                       SUM(json_extract(data, '$.out_tok')) as total_out,
-                      AVG(json_extract(data, '$.latency_ms')) as avg_latency
+                      AVG(json_extract(data, '$.latency_ms')) as avg_latency,
+                      SUM(json_extract(data, '$.cache_read')) as cache_read,
+                      SUM(json_extract(data, '$.cache_create')) as cache_create
                FROM journal WHERE worker_id = ? AND event = 'response'""",
             (worker_id,),
         ).fetchone()
@@ -158,6 +162,8 @@ class MonitorDB:
             total_in_tokens=int(row["total_in"] or 0),
             total_out_tokens=int(row["total_out"] or 0),
             avg_latency_ms=float(row["avg_latency"] or 0),
+            cache_read_tokens=int(row["cache_read"] or 0),
+            cache_create_tokens=int(row["cache_create"] or 0),
         )
 
     def get_memory_entries(
