@@ -21,6 +21,8 @@ class BRAIDAgent(BaseAgent):
     """
 
     _SYSTEM_PROMPT_SUFFIX = """
+ADDITIONAL INFORMATION BEFORE OBSERVATIONS:
+
 SOME MAP SYMBOLS:
 @=you >/<stairs .=floor #=corridor |/-=walls +=closed door '=open door
 {=fountain _=altar ^=trap Letters=monsters (lowercase weaker)
@@ -68,6 +70,7 @@ KEY STRATEGIES:
 - Monsters could be invisible
 - Tinning has beneficial effects
 - Magic markers should be blessed, have or create blessed scrolls of charging
+- Explore efficiently, do not waste movements
 
 EARLY GAME PRIORITIES:
 1. Find and equip any armor/weapons
@@ -109,6 +112,12 @@ HINTS FOR MEMORY USE:
 - content/tags exclusive for agent only - abbreviate freely, disregard human readability, encode as much information as possible, regardless of language used
 - Could use labels for specific levels, areas, monsters, puzzles, short- and long-term planning, risk tracking, specific to character role, ...
 - Use persistent memory to learn permanently and across runs, both tactically and strategically or meta attributes such as labelling strategy for memory, supplementing and overriding system prompt hints for play
+- Your long-term goal beyond this one episode is to get good at playing NetHack!
+
+The following includes several observations, your past actions, and the latest observation.
+Note that the language observation is an incomplete rendering of the map.
+
+Memories are provided to you later.
 
 """.strip()
 
