@@ -25,6 +25,13 @@ class AgentStats:
     single_actions: int
     multi_actions: int
     queued_actions: int
+    # Memory stats
+    episode_mem_adds: int
+    episode_mem_removes: int
+    persistent_mem_adds: int
+    persistent_mem_removes: int
+    # Reasoning stats
+    think_count: int
 
 
 @dataclass
@@ -185,6 +192,7 @@ class MonitorDB:
                     "step": row["step"],
                     "action": data.get("action", ""),
                     "reasoning": data.get("reasoning"),
+                    "action_type": data.get("action_type", "single"),
                     "latency_ms": data.get("latency_ms", 0),
                 })
         return responses
@@ -199,7 +207,8 @@ class MonitorDB:
 
     def get_stats(self, worker_id: str) -> AgentStats:
         """Get aggregate stats for an agent."""
-        row = self.conn.execute(
+        # Response stats
+        resp = self.conn.execute(
             """SELECT MAX(episode) as episode, MAX(step) as step,
                       SUM(json_extract(data, '$.in_tok')) as total_in,
                       SUM(json_extract(data, '$.out_tok')) as total_out,
@@ -208,21 +217,36 @@ class MonitorDB:
                       SUM(json_extract(data, '$.cache_create')) as cache_create,
                       SUM(CASE WHEN json_extract(data, '$.action_type') = 'single' THEN 1 ELSE 0 END) as single_ct,
                       SUM(CASE WHEN json_extract(data, '$.action_type') = 'multi' THEN 1 ELSE 0 END) as multi_ct,
-                      SUM(CASE WHEN json_extract(data, '$.action_type') = 'queued' THEN 1 ELSE 0 END) as queued_ct
+                      SUM(CASE WHEN json_extract(data, '$.action_type') = 'queued' THEN 1 ELSE 0 END) as queued_ct,
+                      SUM(CASE WHEN json_extract(data, '$.reasoning') IS NOT NULL THEN 1 ELSE 0 END) as think_ct
                FROM journal WHERE worker_id = ? AND event = 'response'""",
             (worker_id,),
         ).fetchone()
+        # Memory stats
+        mem = self.conn.execute(
+            """SELECT SUM(json_extract(data, '$.ep_adds')) as ep_adds,
+                      SUM(json_extract(data, '$.ep_removes')) as ep_removes,
+                      SUM(json_extract(data, '$.p_adds')) as p_adds,
+                      SUM(json_extract(data, '$.p_removes')) as p_removes
+               FROM journal WHERE worker_id = ? AND event = 'memory'""",
+            (worker_id,),
+        ).fetchone()
         return AgentStats(
-            episode=row["episode"] or 0,
-            step=row["step"] or 0,
-            total_in_tokens=int(row["total_in"] or 0),
-            total_out_tokens=int(row["total_out"] or 0),
-            avg_latency_ms=float(row["avg_latency"] or 0),
-            cache_read_tokens=int(row["cache_read"] or 0),
-            cache_create_tokens=int(row["cache_create"] or 0),
-            single_actions=int(row["single_ct"] or 0),
-            multi_actions=int(row["multi_ct"] or 0),
-            queued_actions=int(row["queued_ct"] or 0),
+            episode=resp["episode"] or 0,
+            step=resp["step"] or 0,
+            total_in_tokens=int(resp["total_in"] or 0),
+            total_out_tokens=int(resp["total_out"] or 0),
+            avg_latency_ms=float(resp["avg_latency"] or 0),
+            cache_read_tokens=int(resp["cache_read"] or 0),
+            cache_create_tokens=int(resp["cache_create"] or 0),
+            single_actions=int(resp["single_ct"] or 0),
+            multi_actions=int(resp["multi_ct"] or 0),
+            queued_actions=int(resp["queued_ct"] or 0),
+            episode_mem_adds=int(mem["ep_adds"] or 0),
+            episode_mem_removes=int(mem["ep_removes"] or 0),
+            persistent_mem_adds=int(mem["p_adds"] or 0),
+            persistent_mem_removes=int(mem["p_removes"] or 0),
+            think_count=int(resp["think_ct"] or 0),
         )
 
     def get_memory_entries(

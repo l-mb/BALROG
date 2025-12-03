@@ -6,7 +6,7 @@
   <title>BRAID Monitor</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css" id="app-css">
 </head>
 <body>
   <header class="container-fluid">
@@ -65,18 +65,19 @@
 
     document.body.addEventListener('htmx:beforeSwap', function(evt) {
       // Save scroll positions of scrollable elements
-      document.querySelectorAll('.history-list, .memory-list').forEach(el => {
-        const id = el.className;
-        scrollPositions[id] = el.scrollTop;
+      document.querySelectorAll('.history-list, .memory-list, .debug-content').forEach(el => {
+        // Use parent class + own class for unique key
+        const key = (el.closest('article')?.className || '') + ' ' + el.className;
+        scrollPositions[key] = el.scrollTop;
       });
     });
 
     document.body.addEventListener('htmx:afterSwap', function(evt) {
       // Restore scroll positions
-      document.querySelectorAll('.history-list, .memory-list').forEach(el => {
-        const id = el.className;
-        if (scrollPositions[id] !== undefined) {
-          el.scrollTop = scrollPositions[id];
+      document.querySelectorAll('.history-list, .memory-list, .debug-content').forEach(el => {
+        const key = (el.closest('article')?.className || '') + ' ' + el.className;
+        if (scrollPositions[key] !== undefined) {
+          el.scrollTop = scrollPositions[key];
         }
       });
     });
@@ -259,19 +260,19 @@
     });
 
     document.body.addEventListener('mousedown', function(evt) {
-      if (evt.target.closest('.memory-controls, .col-reasoning, .history-list, .memory-list')) {
+      if (evt.target.closest('.memory-controls, .col-reasoning, .history-list, .memory-list, .debug-content')) {
         pauseRefresh();
       }
     });
 
     document.body.addEventListener('scroll', function(evt) {
-      if (evt.target.closest && evt.target.closest('.col-reasoning, .history-list, .memory-list')) {
+      if (evt.target.closest && evt.target.closest('.col-reasoning, .history-list, .memory-list, .debug-content')) {
         pauseRefresh();
       }
     }, true);
 
     document.body.addEventListener('wheel', function(evt) {
-      if (evt.target.closest('.col-reasoning, .history-list, .memory-list')) {
+      if (evt.target.closest('.col-reasoning, .history-list, .memory-list, .debug-content')) {
         pauseRefresh();
       }
     }, true);
@@ -302,6 +303,35 @@
 
     // Initialize panels URL on page load
     updatePanelsUrl();
+
+    // Header auto-hide: show when mouse near top
+    const header = document.querySelector('body > header');
+    const HEADER_TRIGGER_ZONE = 50;  // pixels from top
+    document.addEventListener('mousemove', (e) => {
+      if (e.clientY < HEADER_TRIGGER_ZONE) {
+        header.classList.add('visible');
+      } else if (!header.matches(':hover')) {
+        header.classList.remove('visible');
+      }
+    });
+    header.addEventListener('mouseleave', () => {
+      header.classList.remove('visible');
+    });
+
+    // CSS hot-reload: check for changes every 2s
+    let lastCssModified = null;
+    async function checkCssReload() {
+      try {
+        const resp = await fetch('/static/style.css', { method: 'HEAD' });
+        const modified = resp.headers.get('Last-Modified') || resp.headers.get('ETag');
+        if (lastCssModified && modified !== lastCssModified) {
+          const css = document.getElementById('app-css');
+          css.href = '/static/style.css?v=' + Date.now();
+        }
+        lastCssModified = modified;
+      } catch (e) {}
+    }
+    setInterval(checkCssReload, 2000);
   </script>
 </body>
 </html>

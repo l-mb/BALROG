@@ -191,12 +191,18 @@ class BraidStorage:
                     counts[tag] = counts.get(tag, 0) + 1
         return counts
 
-    def remove(self, entry_id: str) -> bool:
-        cursor = self.conn.execute(
+    def remove(self, entry_id: str) -> str | None:
+        """Remove entry by ID. Returns scope ('episode'/'persistent') if found, None otherwise."""
+        row = self.conn.execute(
+            "SELECT scope FROM memory WHERE id = ? AND deleted = 0", (entry_id,)
+        ).fetchone()
+        if not row:
+            return None
+        self.conn.execute(
             "UPDATE memory SET deleted = 1 WHERE id = ? AND deleted = 0", (entry_id,)
         )
         self.conn.commit()
-        return cursor.rowcount > 0
+        return row["scope"]
 
     def remove_by_episode(self, episode: int) -> int:
         cursor = self.conn.execute(
@@ -336,6 +342,10 @@ class BraidStorage:
         tag_changes: bool = False,
         added_entries: list[dict[str, Any]] | None = None,
         removed_ids: list[str] | None = None,
+        episode_adds: int = 0,
+        persistent_adds: int = 0,
+        episode_removes: int = 0,
+        persistent_removes: int = 0,
     ) -> None:
         if not (adds or removes or tag_changes):
             return
@@ -343,6 +353,10 @@ class BraidStorage:
             "adds": adds,
             "removes": removes,
             "tag_changes": tag_changes,
+            "ep_adds": episode_adds,
+            "p_adds": persistent_adds,
+            "ep_removes": episode_removes,
+            "p_removes": persistent_removes,
         }
         if added_entries:
             data["added"] = added_entries

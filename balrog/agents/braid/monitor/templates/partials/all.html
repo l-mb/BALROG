@@ -32,6 +32,10 @@
         <dd>{{ "{:.1f}".format(stats.avg_latency_ms / 1000) }}s</dd>
         <dt>Actions</dt>
         <dd>{{ stats.single_actions }}s + {{ stats.multi_actions }}m + {{ stats.queued_actions }}q</dd>
+        <dt>Memory</dt>
+        <dd>+{{ stats.episode_mem_adds }}/-{{ stats.episode_mem_removes }}e, +{{ stats.persistent_mem_adds }}/-{{ stats.persistent_mem_removes }}p</dd>
+        <dt>Think</dt>
+        <dd>{{ stats.think_count }}/{{ stats.single_actions + stats.multi_actions }} ({{ "{:.0f}".format(100 * stats.think_count / (stats.single_actions + stats.multi_actions)) if (stats.single_actions + stats.multi_actions) else 0 }}%)</dd>
       </dl>
       {% else %}
       <p class="muted">No stats</p>
@@ -39,84 +43,83 @@
     </article>
   </div>
 
-  <!-- Memory (full width) -->
-  <article class="memory-panel">
-    <header>
-      {% set p_count = entries|selectattr('scope', 'equalto', 'persistent')|list|length %}
-      {% set e_count = entries|selectattr('scope', 'equalto', 'episode')|list|length %}
-      <span>Memory ({{ p_count }}p + {{ e_count }}e{% if show_deleted %}, {{ entries|selectattr('deleted')|list|length }} deleted{% endif %})</span>
-      <div class="memory-controls">
-        <select class="memory-scope-select"
-                onchange="updateMemoryFilter()">
-          <option value="all" {% if memory_scope == 'all' %}selected{% endif %}>All</option>
-          <option value="persistent" {% if memory_scope == 'persistent' %}selected{% endif %}>Persistent</option>
-          <option value="episode" {% if memory_scope == 'episode' %}selected{% endif %}>Episode</option>
-        </select>
-        <label class="memory-deleted-toggle">
-          <input type="checkbox" {% if show_deleted %}checked{% endif %}
-                 onchange="updateMemoryFilter()">
-          Deleted
-        </label>
+  <!-- Memory + Action History row -->
+  <div class="middle-row">
+    <article class="memory-panel">
+      <header>
+        {% set p_count = entries|selectattr('scope', 'equalto', 'persistent')|list|length %}
+        {% set e_count = entries|selectattr('scope', 'equalto', 'episode')|list|length %}
+        <span>Memory ({{ p_count }}p + {{ e_count }}e{% if show_deleted %}, {{ entries|selectattr('deleted')|list|length }} deleted{% endif %})</span>
+        <div class="memory-controls">
+          <select class="memory-scope-select"
+                  onchange="updateMemoryFilter()">
+            <option value="all" {% if memory_scope == 'all' %}selected{% endif %}>All</option>
+            <option value="persistent" {% if memory_scope == 'persistent' %}selected{% endif %}>Persistent</option>
+            <option value="episode" {% if memory_scope == 'episode' %}selected{% endif %}>Episode</option>
+          </select>
+          <label class="memory-deleted-toggle">
+            <input type="checkbox" {% if show_deleted %}checked{% endif %}
+                   onchange="updateMemoryFilter()">
+            Deleted
+          </label>
+        </div>
+      </header>
+      <div class="memory-list">
+        {% if entries %}
+        <table>
+          <thead>
+            <tr>
+              <th class="col-step">@</th>
+              <th class="col-prio">P</th>
+              <th class="col-tags">Tags</th>
+              <th class="col-content">Content</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for e in entries %}
+            <tr class="{% if e.deleted %}deleted-entry{% endif %}{% if e.scope == 'persistent' %} persistent-entry{% endif %}">
+              <td class="col-step">{{ e.source_step if e.source_step is not none else '-' }}</td>
+              <td class="col-prio">{{ e.priority }}</td>
+              <td class="col-tags">{% for tag in e.tags.split(',') %}<span class="tag">{{ tag.strip() }}</span>{% endfor %}</td>
+              <td class="col-content"><pre>{{ e.content }}</pre></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="muted">No memory entries</p>
+        {% endif %}
       </div>
-    </header>
-    <div class="memory-list">
-      {% if entries %}
-      <table>
-        <thead>
-          <tr>
-            <th class="col-id">ID</th>
-            <th class="col-step">@</th>
-            <th class="col-prio">P</th>
-            <th class="col-tags">Tags</th>
-            <th class="col-content">Content</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for e in entries %}
-          <tr class="{% if e.deleted %}deleted-entry{% endif %}{% if e.scope == 'persistent' %} persistent-entry{% endif %}">
-            <td class="col-id"><code>{{ e.id[:6] }}</code></td>
-            <td class="col-step">{{ e.source_step if e.source_step is not none else '-' }}</td>
-            <td class="col-prio">{{ e.priority }}</td>
-            <td class="col-tags">{{ e.scope[:1] }} {{ e.tags }}</td>
-            <td class="col-content">{{ e.content }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% else %}
-      <p class="muted">No memory entries</p>
-      {% endif %}
-    </div>
-  </article>
+    </article>
 
-  <!-- Action History (full width) -->
-  <article class="history-panel">
-    <header>Action History ({{ responses|length if responses else 0 }} actions)</header>
-    <div class="history-list">
-      {% if responses and responses|length > 0 %}
-      <table class="history-table">
-        <thead>
-          <tr>
-            <th class="col-step">Step</th>
-            <th class="col-action">Action</th>
-            <th class="col-reasoning">Reasoning</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in responses %}
-          <tr>
-            <td class="col-step">{{ r.step }}</td>
-            <td class="col-action"><code>{{ r.action|default('?', true) }}</code></td>
-            <td class="col-reasoning"><pre>{{ r.reasoning if r.reasoning else "(no reasoning)" }}</pre></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% else %}
-      <p class="muted">No actions yet</p>
-      {% endif %}
-    </div>
-  </article>
+    <article class="history-panel">
+      <header>Action History ({{ responses|length if responses else 0 }} actions)</header>
+      <div class="history-list">
+        {% if responses and responses|length > 0 %}
+        <table class="history-table">
+          <thead>
+            <tr>
+              <th class="col-step">Step</th>
+              <th class="col-action">Action</th>
+              <th class="col-reasoning">Reasoning</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in responses %}
+            <tr>
+              <td class="col-step">{{ r.step }}</td>
+              <td class="col-action"><code>{{ r.action|default('?', true) }}</code></td>
+              <td class="col-reasoning"><pre>{% if r.action_type == 'queued' %}(queued){% elif r.reasoning %}{{ r.reasoning }}{% else %}(no reasoning){% endif %}</pre></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="muted">No actions yet</p>
+        {% endif %}
+      </div>
+    </article>
+  </div>
 
   <!-- Debug: Full Prompt/Response -->
   <div class="debug-row">

@@ -10,13 +10,13 @@
 
 .top-row {
     display: flex;
-    gap: 0.75rem;
+    gap: 0.7rem;
     flex: 0 0 auto;
 }
 
 /* Screen panel - 80 cols at 12px monospace (~600px) */
 .screen-panel {
-    flex: 0 0 70%;
+    flex: 0 0 74%;
     min-width: 620px;
 }
 
@@ -26,17 +26,26 @@
     min-width: 360px;
 }
 
-/* Memory panel - full width */
-.memory-panel {
-    flex: 0 0 auto;
+/* Middle row: Memory + History side by side */
+.middle-row {
+    display: flex;
+    gap: 0.75rem;
+    flex: 1 1 auto;
+    min-height: 300px;
 }
 
-/* History panel - fills remaining, scrollable */
-.history-panel {
-    flex: 1 1 auto;
-    min-height: 600px;
+.memory-panel {
+    flex: 1 1 50%;
     display: flex;
     flex-direction: column;
+    min-width: 0;
+}
+
+.history-panel {
+    flex: 1 1 50%;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
 }
 
 .history-list {
@@ -46,24 +55,24 @@
 
 /* History table */
 .history-table {
-    font-size: 0.7rem;
+    font-size: 0.6rem;
     width: 100%;
     table-layout: fixed;
 }
 
 .history-table th,
 .history-table td {
-    padding: 0.3rem 0.4rem;
+    padding: 0.2rem 0.2rem;
     vertical-align: top;
 }
 
 .col-step {
-    width: 4rem;
+    width: 2rem;
     text-align: center;
 }
 
 .col-action {
-    width: 180px;
+    width: 120px;
     word-break: break-word;
 }
 
@@ -78,7 +87,7 @@
 .col-reasoning pre {
     font-size: 0.6rem;
     margin: 0;
-    padding: 0.3rem;
+    padding: 0.2rem;
     background: var(--pico-card-sectioning-background-color);
     white-space: pre-wrap;
     word-break: break-word;
@@ -89,11 +98,11 @@
 /* NetHack screen - 80x24 fixed */
 .screen {
     font-family: monospace;
-    font-size: 24px;
+    font-size: 18px;
     line-height: 1.1;
     background: #1a1a2e;
     color: #eee;
-    padding: 0.4rem;
+    padding: 0.2rem;
     overflow-x: auto;
     white-space: pre;
     margin: 0;
@@ -108,13 +117,13 @@
 
 .memory-controls {
     display: flex;
-    gap: 0.75rem;
+    gap: 0.6rem;
     align-items: center;
 }
 
 .memory-scope-select {
-    padding: 0.15rem 0.4rem;
-    font-size: 0.75rem;
+    padding: 0.15rem 0.3rem;
+    font-size: 0.6rem;
     margin: 0;
     min-width: auto;
     width: auto;
@@ -124,7 +133,7 @@
     display: flex;
     align-items: center;
     gap: 0.3rem;
-    font-size: 0.75rem;
+    font-size: 0.6rem;
     font-weight: normal;
     margin: 0;
     cursor: pointer;
@@ -138,7 +147,7 @@
 
 /* Memory table */
 .memory-list {
-    max-height: 400px;
+    flex: 1;
     overflow-y: auto;
 }
 
@@ -165,17 +174,14 @@
 }
 
 /* Column widths */
-.col-id {
-    width: 100px;
-}
-
 .col-prio {
-    width: 60px;
+    width: 1rem;
     text-align: center;
 }
 
 .col-tags {
-    width: 240px;
+    width: 200px;
+    word-break: normal;
 }
 
 .col-content {
@@ -187,14 +193,34 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    padding: 0.2rem 0.4rem;
+    padding: 0.2rem 0.2rem;
     vertical-align: top;
 }
 
+.memory-list td.col-tags,
 .memory-list td.col-content {
     white-space: normal;
     word-break: break-word;
     overflow: visible;
+}
+
+.memory-list pre {
+    font-size: 0.6rem;
+    margin: 0;
+    padding: 0.2rem;
+    background: var(--pico-card-sectioning-background-color);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* Tag badges */
+.tag {
+    display: inline-block;
+    font-size: 0.55rem;
+    padding: 0.1rem 0.2rem;
+    margin: 0.05rem;
+    background: var(--pico-card-sectioning-background-color);
+    border-radius: 3px;
 }
 
 /* Muted text */
@@ -209,7 +235,7 @@ dl {
     grid-template-columns: auto 1fr;
     gap: 0.15rem 0.5rem;
     margin: 0;
-    font-size: 0.85rem;
+    font-size: 20px;
 }
 
 dt {
@@ -220,13 +246,31 @@ dd {
     margin: 0;
 }
 
-/* Header nav tweaks */
-body > header.container-fluid {
-    padding-top: 0.75rem;
-    padding-bottom: 0.75rem;
+/* Header nav tweaks - auto-hide */
+body>header.container-fluid {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    padding-top: 0.3rem;
+    padding-bottom: 0.3rem;
+    transform: translateY(-100%);
+    transition: transform 0.2s ease;
+    background: var(--pico-background-color);
+    border-bottom: 1px solid var(--pico-muted-border-color);
 }
 
-body > header nav {
+body>header.container-fluid.visible {
+    transform: translateY(0);
+}
+
+/* Offset body for hidden header */
+body>main.container-fluid {
+    padding-top: 0.5rem;
+}
+
+body>header nav {
     margin: 0;
 }
 
@@ -287,8 +331,8 @@ article {
 
 article header {
     font-weight: bold;
-    font-size: 0.85rem;
-    padding: 0.3rem 0.5rem;
+    font-size: 0.7rem;
+    padding: 0.3rem 0.4rem;
     margin: -0.5rem -0.5rem 0.4rem -0.5rem;
     background: var(--pico-card-sectioning-background-color);
 }
@@ -316,7 +360,7 @@ article header {
 .debug-message {
     margin-bottom: 0.5rem;
     border-left: 3px solid var(--pico-muted-border-color);
-    padding-left: 0.5rem;
+    padding-left: 0.4rem;
 }
 
 .debug-message pre {
@@ -353,6 +397,18 @@ article header {
 }
 
 /* Responsive */
+@media (max-width: 1200px) {
+    .middle-row {
+        flex-direction: column;
+    }
+
+    .memory-panel,
+    .history-panel {
+        flex: 0 0 auto;
+        min-height: 250px;
+    }
+}
+
 @media (max-width: 900px) {
     .top-row {
         flex-direction: column;
