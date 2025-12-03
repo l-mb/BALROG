@@ -70,7 +70,7 @@ KEY STRATEGIES:
 - Monsters could be invisible
 - Tinning has beneficial effects
 - Magic markers should be blessed, have or create blessed scrolls of charging
-- Explore efficiently, do not waste movements
+- Explore efficiently, do not waste movements, avoid retracing steps
 
 EARLY GAME PRIORITIES:
 1. Find and equip any armor/weapons
@@ -92,16 +92,15 @@ COMMON MISTAKES TO AVOID:
 - Using unidentified wands pointed at self
 - Stepping on traps repeatedly (use search)
 
-RESPONSE FORMAT:
-1. Assess: THINKING_NEEDED: yes/no
-2. If yes: <think>your terse analysis, maximize signal to noise, optimize for your own use</think>
-3. Memory updates:
+RESPONSE FORMAT (all parts in single response):
+1. Optional thinking if situation requires it according to your judgment: <think>terse analysis</think>
+2. Optional memory updates:
 <memory_updates>
 add: [{"scope": "episode|persistent", "tags": "t1,t2", "prio": 5, "content": "..."}]
 remove: ["entry_id"]
 enable_labels: ["tag"] | disable_labels: ["tag"] | reset_labels: true
 </memory_updates>
-4. Action: <|ACTION|>your_action<|END|>
+3. REQUIRED action: <|ACTION|>your_action<|END|>
 
 MEMORY:
 - scope: episode (cleared each ep) | persistent (survives)
@@ -341,15 +340,35 @@ Memories are provided to you later.
 
         return response._replace(reasoning=reasoning or completion, completion=action)
 
+    # Words that are unlikely to be valid actions
+    _SKIP_WORDS = frozenset({
+        "yes", "no", "true", "false", "the", "a", "an", "is", "are", "was", "were",
+        "i", "you", "it", "this", "that", "should", "would", "could", "will", "can",
+        "thinking", "action", "memory", "response", "format", "required", "optional",
+    })
+
     def _fallback_action(self, completion: str) -> str:
         """Extract action when tags missing. Default to 'esc' if unparseable."""
         lines = completion.strip().split("\n")
         for line in reversed(lines):
             line = line.strip().lower()
-            if line and not line.startswith(("<", "thinking", "memory", "add", "remove", "enable", "disable", "reset")):
-                words = line.split()
-                if words:
-                    return words[-1]
+            # Skip XML-like tags and known non-action prefixes
+            if not line or line.startswith(("<", "thinking", "memory", "add:", "remove:", "enable", "disable", "reset")):
+                continue
+            # Get last word, strip punctuation
+            words = line.split()
+            if words:
+                candidate = words[-1].rstrip(".,!?:;")
+                if candidate and candidate not in self._SKIP_WORDS:
+                    self.storage.log_error(
+                        self.episode_number, self._step,
+                        f"Fallback action '{candidate}' from: {line[:50]}"
+                    )
+                    return candidate
+        self.storage.log_error(
+            self.episode_number, self._step,
+            f"No action found, defaulting to 'esc'. Response: {completion[:100]}"
+        )
         return "esc"
 
     def _process_memory_updates(self, mem_text: str) -> None:
