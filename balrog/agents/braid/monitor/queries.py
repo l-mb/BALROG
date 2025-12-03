@@ -106,6 +106,55 @@ class MonitorDB:
             )
         return None
 
+    def get_latest_prompt(self, worker_id: str, max_step: int | None = None) -> dict | None:
+        """Get the latest full prompt for an agent."""
+        if max_step is not None:
+            row = self.conn.execute(
+                """SELECT step, data FROM journal
+                   WHERE worker_id = ? AND event = 'prompt' AND step <= ?
+                   ORDER BY id DESC LIMIT 1""",
+                (worker_id, max_step),
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                """SELECT step, data FROM journal
+                   WHERE worker_id = ? AND event = 'prompt'
+                   ORDER BY id DESC LIMIT 1""",
+                (worker_id,),
+            ).fetchone()
+        if row and row["data"]:
+            data = json.loads(row["data"])
+            return {"step": row["step"], "messages": data.get("messages", [])}
+        return None
+
+    def get_latest_full_response(self, worker_id: str, max_step: int | None = None) -> dict | None:
+        """Get the latest full response data for an agent."""
+        if max_step is not None:
+            row = self.conn.execute(
+                """SELECT step, data FROM journal
+                   WHERE worker_id = ? AND event = 'response' AND step <= ?
+                   ORDER BY id DESC LIMIT 1""",
+                (worker_id, max_step),
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                """SELECT step, data FROM journal
+                   WHERE worker_id = ? AND event = 'response'
+                   ORDER BY id DESC LIMIT 1""",
+                (worker_id,),
+            ).fetchone()
+        if row and row["data"]:
+            data = json.loads(row["data"])
+            return {
+                "step": row["step"],
+                "action": data.get("action", ""),
+                "reasoning": data.get("reasoning"),
+                "latency_ms": data.get("latency_ms", 0),
+                "in_tok": data.get("in_tok", 0),
+                "out_tok": data.get("out_tok", 0),
+            }
+        return None
+
     def get_recent_responses(
         self, worker_id: str, limit: int = 20, max_step: int | None = None
     ) -> list[dict]:

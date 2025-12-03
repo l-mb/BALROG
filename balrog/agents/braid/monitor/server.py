@@ -88,6 +88,11 @@ def create_app(db_path: Path) -> Starlette:
         entries = db.get_memory_entries(
             limit=50, scope=scope, include_deleted=include_deleted, episode=current_episode
         )
+
+        # Get full prompt and response for debug panel
+        full_prompt = db.get_latest_prompt(worker_id, max_step=current_step)
+        full_response = db.get_latest_full_response(worker_id, max_step=current_step)
+
         return templates.TemplateResponse(
             request,
             "partials/all.html",
@@ -101,6 +106,8 @@ def create_app(db_path: Path) -> Starlette:
                 "worker_id": worker_id,
                 "current_step": current_step,
                 "max_step": max_step,
+                "full_prompt": full_prompt,
+                "full_response": full_response,
             },
         )
 

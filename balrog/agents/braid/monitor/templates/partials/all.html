@@ -40,7 +40,9 @@
   <!-- Memory (full width) -->
   <article class="memory-panel">
     <header>
-      <span>Memory ({{ entries|length }} entries{% if show_deleted %}, {{ entries|selectattr('deleted')|list|length }} deleted{% endif %})</span>
+      {% set p_count = entries|selectattr('scope', 'equalto', 'persistent')|list|length %}
+      {% set e_count = entries|selectattr('scope', 'equalto', 'episode')|list|length %}
+      <span>Memory ({{ p_count }}p + {{ e_count }}e{% if show_deleted %}, {{ entries|selectattr('deleted')|list|length }} deleted{% endif %})</span>
       <div class="memory-controls">
         <select class="memory-scope-select"
                 onchange="updateMemoryFilter()">
@@ -111,4 +113,43 @@
       {% endif %}
     </div>
   </article>
+
+  <!-- Debug: Full Prompt/Response -->
+  <div class="debug-row">
+    <article class="debug-panel prompt-panel">
+      <header>Full Prompt{% if full_prompt %} (step {{ full_prompt.step }}, {{ full_prompt.messages|length }} messages){% endif %}</header>
+      <div class="debug-content">
+        {% if full_prompt and full_prompt.messages %}
+        {% for msg in full_prompt.messages %}
+        <div class="debug-message debug-role-{{ msg.role }}">
+          <div class="debug-role">{{ msg.role }}</div>
+          <pre>{{ msg.content }}</pre>
+        </div>
+        {% endfor %}
+        {% else %}
+        <p class="muted">No prompt logged (enable log_full_prompt in config)</p>
+        {% endif %}
+      </div>
+    </article>
+
+    <article class="debug-panel response-panel">
+      <header>Full Response{% if full_response %} (step {{ full_response.step }}, {{ full_response.in_tok }} in / {{ full_response.out_tok }} out){% endif %}</header>
+      <div class="debug-content">
+        {% if full_response %}
+        <div class="debug-message">
+          <div class="debug-role">action</div>
+          <pre>{{ full_response.action }}</pre>
+        </div>
+        {% if full_response.reasoning %}
+        <div class="debug-message">
+          <div class="debug-role">reasoning</div>
+          <pre>{{ full_response.reasoning }}</pre>
+        </div>
+        {% endif %}
+        {% else %}
+        <p class="muted">No response yet</p>
+        {% endif %}
+      </div>
+    </article>
+  </div>
 </div>
