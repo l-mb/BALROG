@@ -323,16 +323,16 @@ class BraidStorage:
         step: int,
         adds: int = 0,
         removes: int = 0,
-        label_changes: bool = False,
+        tag_changes: bool = False,
         added_entries: list[dict[str, Any]] | None = None,
         removed_ids: list[str] | None = None,
     ) -> None:
-        if not (adds or removes or label_changes):
+        if not (adds or removes or tag_changes):
             return
         data: dict[str, Any] = {
             "adds": adds,
             "removes": removes,
-            "label_changes": label_changes,
+            "tag_changes": tag_changes,
         }
         if added_entries:
             data["added"] = added_entries

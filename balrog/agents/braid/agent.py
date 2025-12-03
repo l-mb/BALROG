@@ -16,7 +16,7 @@ class BRAIDAgent(BaseAgent):
     An agent that learns from experience through unified memory:
     - Episode memory: per-episode insights (scope=episode)
     - Persistent memory: cross-episode knowledge (scope=persistent)
-    - Label filtering: LLM can enable/disable labels to control what's shown
+    - Tag filtering: LLM can enable/disable tags to control what's shown
     - Adaptive thinking: LLM self-selects depth of reasoning per step
     """
 
@@ -98,19 +98,21 @@ RESPONSE FORMAT (all parts in single response):
 <memory_updates>
 add: [{"scope": "episode|persistent", "tags": "t1,t2", "prio": 5, "content": "..."}]
 remove: ["entry_id"]
-enable_labels: ["tag"] | disable_labels: ["tag"] | reset_labels: true
+enable_tags: ["tag"] | disable_tags: ["tag"] | reset_tags: true
 </memory_updates>
 3. REQUIRED action: <|ACTION|>your_action<|END|>
 
 MEMORY:
 - scope: episode (cleared each ep) | persistent (survives)
 - prio: 1-9, higher shown first when limit reached (default 5)
-- enable/disable_labels: filter what's shown; reset_labels: true to show all
+- enable/disable_tags: filter what's shown; reset_tags: true to show all
+- You're also provided with a list of existing tags and how many entries they have
 
 HINTS FOR MEMORY USE:
 - content/tags exclusive for agent only - abbreviate freely, disregard human readability, encode as much information as possible, regardless of language used
-- Could use labels for specific levels, areas, monsters, puzzles, short- and long-term planning, risk tracking, specific to character role, ...
-- Use persistent memory to learn permanently and across runs, both tactically and strategically or meta attributes such as labelling strategy for memory, supplementing and overriding system prompt hints for play
+- Could use tags for specific levels, areas, monsters, puzzles, short- and long-term planning, risk tracking, specific to character role, ...
+- Use episode memory for tracking exploration, stashes, plans, etc: anything that is only for this particular playthrough attempt
+- Use persistent memory to learn permanently and across runs, both tactically and strategically or meta attributes such as tagging strategy for memory, supplementing and overriding system prompt hints for play
 - Your long-term goal beyond this one episode is to get good at playing NetHack!
 
 None of your thinking needs to be human readable. Encode as much signal as possible in a terse format and language entirely at your discretion, as long as the response format is maintained.
@@ -131,7 +133,7 @@ Memories are provided to you later.
         self.storage = BraidStorage(Path(braid_cfg.db_path))
         self.max_memory_context = braid_cfg.get("max_persistent_context", 40)
         self.episode_number = self.storage.max_episode()
-        self._enabled_labels: set[str] | None = None
+        self._enabled_tags: set[str] | None = None
 
         # Override history limit if specified
         if "max_text_history" in braid_cfg:
@@ -152,7 +154,7 @@ Memories are provided to you later.
         # Track memory update counts and details
         self._mem_adds = 0
         self._mem_removes = 0
-        self._label_changes = False
+        self._tag_changes = False
         self._added_entries: list[dict[str, Any]] = []
         self._removed_ids: list[str] = []
 
@@ -216,10 +218,10 @@ Memories are provided to you later.
         sections = []
 
         p_entries = self.storage.retrieve(
-            tags=self._enabled_labels, scope=MemoryScope.PERSISTENT, limit=self.max_memory_context
+            tags=self._enabled_tags, scope=MemoryScope.PERSISTENT, limit=self.max_memory_context
         )
         e_entries = self.storage.retrieve(
-            tags=self._enabled_labels, scope=MemoryScope.EPISODE,
+            tags=self._enabled_tags, scope=MemoryScope.EPISODE,
             episode=self.episode_number, limit=self.max_memory_context
         )
 
@@ -227,7 +229,7 @@ Memories are provided to you later.
             lines = [f"[{e.entry_id}] (prio:{e.priority}) (tags: {e.tags}) {e.content}" for e in p_entries]
             header = f"PERSISTENT ({len(p_entries)}"
             if len(p_entries) >= self.max_memory_context:
-                total = self.storage.count(tags=self._enabled_labels, scope=MemoryScope.PERSISTENT)
+                total = self.storage.count(tags=self._enabled_tags, scope=MemoryScope.PERSISTENT)
                 hidden = total - len(p_entries)
                 if hidden > 0:
                     header += f"+{hidden} hidden due to limit"
@@ -239,7 +241,7 @@ Memories are provided to you later.
             header = f"EPISODE ({len(e_entries)}"
             if len(e_entries) >= self.max_memory_context:
                 total = self.storage.count(
-                    tags=self._enabled_labels, scope=MemoryScope.EPISODE, episode=self.episode_number
+                    tags=self._enabled_tags, scope=MemoryScope.EPISODE, episode=self.episode_number
                 )
                 hidden = total - len(e_entries)
                 if hidden > 0:
@@ -247,17 +249,17 @@ Memories are provided to you later.
             header += "):"
             sections.append(f"{header}\n" + "\n".join(lines))
 
-        label_info = self._compute_label_summary(p_entries + e_entries)
-        if label_info:
-            sections.append(label_info)
+        tag_info = self._compute_tag_summary(p_entries + e_entries)
+        if tag_info:
+            sections.append(tag_info)
 
         sections.append(current_content)
         sections.append(self._get_action_instructions())
 
         return "\n\n".join(sections)
 
-    def _compute_label_summary(self, entries: list[MemoryEntry]) -> str:
-        """Compute label summary from already-retrieved entries."""
+    def _compute_tag_summary(self, entries: list[MemoryEntry]) -> str:
+        """Compute tag summary from already-retrieved entries."""
         if not entries:
             return ""
         tag_counts: dict[str, int] = {}
@@ -273,12 +275,12 @@ Memories are provided to you later.
 
     def _get_action_instructions(self) -> str:
         """Minimal reminder - full instructions in system prompt."""
-        if self._enabled_labels is None:
-            filter_state = "labels: all"
-        elif not self._enabled_labels:
-            filter_state = "labels: none (all hidden)"
+        if self._enabled_tags is None:
+            filter_state = "tags: all"
+        elif not self._enabled_tags:
+            filter_state = "tags: none (all hidden)"
         else:
-            filter_state = f"labels: {','.join(sorted(self._enabled_labels))}"
+            filter_state = f"tags: {','.join(sorted(self._enabled_tags))}"
         return f"[{filter_state}] <|ACTION|>action<|END|>"
 
     def _parse_response(self, response: LLMResponse) -> LLMResponse:
@@ -298,7 +300,7 @@ Memories are provided to you later.
         # Reset memory update counters
         self._mem_adds = 0
         self._mem_removes = 0
-        self._label_changes = False
+        self._tag_changes = False
         self._added_entries = []
         self._removed_ids = []
 
@@ -336,7 +338,7 @@ Memories are provided to you later.
             step=self._step,
             adds=self._mem_adds,
             removes=self._mem_removes,
-            label_changes=self._label_changes,
+            tag_changes=self._tag_changes,
             added_entries=self._added_entries if self._log_memory_details else None,
             removed_ids=self._removed_ids if self._log_memory_details else None,
         )
@@ -429,47 +431,47 @@ Memories are provided to you later.
             except json.JSONDecodeError:
                 self.storage.log_error(self.episode_number, self._step, "Failed to parse memory removals")
 
-        # Parse enable_labels
-        enable_match = re.search(r"enable_labels:\s*\[(.+?)\]", mem_text, re.DOTALL)
+        # Parse enable_tags
+        enable_match = re.search(r"enable_tags:\s*\[(.+?)\]", mem_text, re.DOTALL)
         if enable_match:
             try:
-                labels = json.loads(f"[{enable_match.group(1)}]")
-                labels = {str(lbl).lower().strip() for lbl in labels if isinstance(lbl, str)}
-                if labels:
-                    if self._enabled_labels is not None:
-                        self._enabled_labels |= labels
-                    self._label_changes = True
+                tags = json.loads(f"[{enable_match.group(1)}]")
+                tags = {str(lbl).lower().strip() for lbl in tags if isinstance(lbl, str)}
+                if tags:
+                    if self._enabled_tags is not None:
+                        self._enabled_tags |= tags
+                    self._tag_changes = True
             except json.JSONDecodeError:
-                self.storage.log_error(self.episode_number, self._step, "Failed to parse enable_labels")
+                self.storage.log_error(self.episode_number, self._step, "Failed to parse enable_tags")
 
-        # Parse disable_labels
-        disable_match = re.search(r"disable_labels:\s*\[(.+?)\]", mem_text, re.DOTALL)
+        # Parse disable_tags
+        disable_match = re.search(r"disable_tags:\s*\[(.+?)\]", mem_text, re.DOTALL)
         if disable_match:
             try:
-                labels = json.loads(f"[{disable_match.group(1)}]")
-                labels = {str(lbl).lower().strip() for lbl in labels if isinstance(lbl, str)}
-                if labels:
-                    if self._enabled_labels is None:
+                tags = json.loads(f"[{disable_match.group(1)}]")
+                tags = {str(lbl).lower().strip() for lbl in tags if isinstance(lbl, str)}
+                if tags:
+                    if self._enabled_tags is None:
                         all_tags = self.storage.all_tags()
-                        self._enabled_labels = all_tags - labels
+                        self._enabled_tags = all_tags - tags
                     else:
-                        self._enabled_labels -= labels
-                    self._label_changes = True
+                        self._enabled_tags -= tags
+                    self._tag_changes = True
             except json.JSONDecodeError:
-                self.storage.log_error(self.episode_number, self._step, "Failed to parse disable_labels")
+                self.storage.log_error(self.episode_number, self._step, "Failed to parse disable_tags")
 
-        # Parse reset_labels
-        reset_match = re.search(r"reset_labels:\s*(true|false)", mem_text, re.IGNORECASE)
+        # Parse reset_tags
+        reset_match = re.search(r"reset_tags:\s*(true|false)", mem_text, re.IGNORECASE)
         if reset_match and reset_match.group(1).lower() == "true":
-            self._enabled_labels = None
-            self._label_changes = True
+            self._enabled_tags = None
+            self._tag_changes = True
 
     def reset(self) -> None:
         """Reset for new episode."""
         super().reset()
         self.episode_number += 1
         self._step = 0
-        self._enabled_labels = None
+        self._enabled_tags = None
         self._episode_input_tokens = 0
         self._episode_output_tokens = 0
         self.storage.log_reset(self.episode_number)
