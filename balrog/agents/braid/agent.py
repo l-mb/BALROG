@@ -1,5 +1,4 @@
 import json
-import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -7,9 +6,8 @@ from typing import Any
 from balrog.agents.base import BaseAgent
 from balrog.client import LLMResponse
 
+from .journal import BraidJournal
 from .memory import FileMemoryBackend, MemoryEntry, MemoryScope
-
-logger = logging.getLogger(__name__)
 
 
 class BRAIDAgent(BaseAgent):
@@ -39,7 +37,7 @@ MEMORY:
 - prio: 1-9, higher shown first when limit reached (default 5)
 - enable/disable_labels: filter what's shown; reset_labels: true to show all
 
-EFFICIENCY: content/tags for agent only - abbreviate freely.
+EFFICIENCY: content/tags for agent only - abbreviate freely, as terse as possible, disregard human readability
 """.strip()
 
     def __init__(self, client_factory: Any, prompt_builder: Any, config: Any):
@@ -59,9 +57,53 @@ EFFICIENCY: content/tags for agent only - abbreviate freely.
         self.episode_number = self.memory.max_episode()
         self._enabled_labels: set[str] | None = None  # None = all labels enabled
 
+        # Override history limit if specified in braid config
+        if "max_text_history" in braid_cfg:
+            self.prompt_builder.max_text_history = braid_cfg.max_text_history
+
+        # Initialize journal for debugging/monitoring
+        journal_path = braid_cfg.get("journal_path")
+        log_full_prompt = braid_cfg.get("journal_full_prompt", False)
+        self._journal_memory_details = braid_cfg.get("journal_memory_details", False)
+        self.journal = BraidJournal(
+            path=journal_path,
+            enabled=journal_path is not None,
+            log_full_prompt=log_full_prompt,
+        )
+        self.journal.set_episode(self.episode_number)
+
+        # Track memory update counts and details for journal
+        self._mem_adds = 0
+        self._mem_removes = 0
+        self._label_changes = False
+        self._added_entries: list[dict[str, Any]] = []
+        self._removed_ids: list[str] = []
+
     def build_system_prompt(self, env_instruction: str) -> str:
         """Append BRAID response format instructions to environment prompt."""
         return f"{env_instruction}\n\n{self._SYSTEM_PROMPT_SUFFIX}"
+
+    def _extract_screen(self, obs: dict[str, Any]) -> str | None:
+        """Extract ASCII screen from observation (NetHack tty_chars)."""
+        # Try to get tty_chars from various observation structures
+        tty_chars = obs.get("tty_chars")
+        if tty_chars is None:
+            # May be nested under "text" or similar
+            text_obs = obs.get("text", {})
+            if isinstance(text_obs, dict):
+                tty_chars = text_obs.get("tty_chars")
+        if tty_chars is None:
+            return None
+        # Render as ASCII string
+        try:
+            rows, cols = tty_chars.shape
+            lines = []
+            for i in range(rows):
+                line = "".join(chr(tty_chars[i, j]) for j in range(cols))
+                lines.append(line)
+            return "\n".join(lines)
+        except (AttributeError, TypeError):
+            return None
 
     def act(self, obs: dict[str, Any], prev_action: str | None = None) -> LLMResponse:
         if prev_action:
@@ -73,122 +115,84 @@ EFFICIENCY: content/tags for agent only - abbreviate freely.
         if messages:
             messages[-1].content = self._build_enhanced_prompt(messages[-1].content)
 
+        # Log screen if available (before request for context)
+        screen = self._extract_screen(obs)
+        if screen:
+            self.journal.log_screen(screen)
+
+        # Extract observation text for journal
+        obs_text = obs.get("text", {}).get("short_term_context", "")
+        self.journal.log_request_start(messages, observation_text=obs_text)
+
         response = self.client.generate(messages)
         return self._parse_response(response)
 
-    def _get_label_stats(
-        self, scope: MemoryScope, episode: int | None = None
-    ) -> dict[str, Any]:
-        """Get label statistics for prompt building."""
-        counts = self.memory.count_by_tag(scope=scope, episode=episode)
-        all_labels = set(counts.keys())
-
-        if self._enabled_labels is None:
-            enabled = all_labels
-            disabled: set[str] = set()
-        else:
-            enabled = self._enabled_labels & all_labels
-            disabled = all_labels - self._enabled_labels
-
-        return {
-            "enabled": {lbl: counts[lbl] for lbl in enabled},
-            "disabled": {lbl: counts[lbl] for lbl in disabled},
-            "total_enabled": sum(counts[lbl] for lbl in enabled),
-            "total_disabled": sum(counts[lbl] for lbl in disabled),
-        }
-
-    def _format_label_controls(
-        self, persistent_stats: dict[str, Any], episode_stats: dict[str, Any]
-    ) -> str:
-        """Format the label filter controls for the prompt."""
-        lines = ["MEMORY LABEL FILTERS:"]
-
-        # Merge counts from both scopes
-        all_enabled: dict[str, int] = {}
-        all_disabled: dict[str, int] = {}
-
-        for lbl, cnt in persistent_stats["enabled"].items():
-            all_enabled[lbl] = all_enabled.get(lbl, 0) + cnt
-        for lbl, cnt in episode_stats["enabled"].items():
-            all_enabled[lbl] = all_enabled.get(lbl, 0) + cnt
-        for lbl, cnt in persistent_stats["disabled"].items():
-            all_disabled[lbl] = all_disabled.get(lbl, 0) + cnt
-        for lbl, cnt in episode_stats["disabled"].items():
-            all_disabled[lbl] = all_disabled.get(lbl, 0) + cnt
-
-        if all_enabled:
-            enabled_str = ", ".join(f"{lbl}({cnt})" for lbl, cnt in sorted(all_enabled.items()))
-            lines.append(f"Enabled: {enabled_str}")
-        else:
-            lines.append("Enabled: (none)")
-
-        if all_disabled:
-            disabled_str = ", ".join(f"{lbl}({cnt})" for lbl, cnt in sorted(all_disabled.items()))
-            lines.append(f"Disabled (hidden): {disabled_str}")
-
-        total_hidden = persistent_stats["total_disabled"] + episode_stats["total_disabled"]
-        if total_hidden > 0:
-            lines.append(f"({total_hidden} entries hidden by disabled labels)")
-
-        return "\n".join(lines)
-
     def _build_enhanced_prompt(self, current_content: str) -> str:
-        """Build prompt with sections ordered for optimal cache hits.
+        """Build prompt optimized for cache hits and minimal queries.
 
-        Order: persistent (stable) → episode (per-episode) → labels (dynamic) → observation
+        Order: persistent (stable) → episode (per-episode) → labels → observation
         """
         sections = []
 
-        # Persistent memory first (most stable across steps - best cache prefix)
-        persistent, p_shown, p_more = self._format_memory(MemoryScope.PERSISTENT)
-        if persistent:
-            header = f"PERSISTENT ({p_shown}"
-            if p_more > 0:
-                header += f"+{p_more} hidden due to limits"
+        # Retrieve entries for each scope
+        p_entries = self.memory.retrieve(
+            tags=self._enabled_labels, scope=MemoryScope.PERSISTENT, limit=self.max_memory_context
+        )
+        e_entries = self.memory.retrieve(
+            tags=self._enabled_labels, scope=MemoryScope.EPISODE,
+            episode=self.episode_number, limit=self.max_memory_context
+        )
+
+        if p_entries:
+            lines = [f"[{e.entry_id}] (prio:{e.priority}) (tags: {e.tags}) {e.content}" for e in p_entries]
+            header = f"PERSISTENT ({len(p_entries)}"
+            # Only count hidden if we hit the limit
+            if len(p_entries) >= self.max_memory_context:
+                total = self.memory.count(tags=self._enabled_labels, scope=MemoryScope.PERSISTENT)
+                hidden = total - len(p_entries)
+                if hidden > 0:
+                    header += f"+{hidden} hidden due to limit"
             header += "):"
-            sections.append(f"{header}\n{persistent}")
+            sections.append(f"{header}\n" + "\n".join(lines))
 
-        # Episode memory (stable within episode)
-        episode, e_shown, e_more = self._format_memory(MemoryScope.EPISODE, episode=self.episode_number)
-        if episode:
-            header = f"EPISODE ({e_shown}"
-            if e_more > 0:
-                header += f"+{e_more} hidden due to limits"
+        if e_entries:
+            lines = [f"[{e.entry_id}] (prio:{e.priority}) (tags: {e.tags}) {e.content}" for e in e_entries]
+            header = f"EPISODE ({len(e_entries)}"
+            if len(e_entries) >= self.max_memory_context:
+                total = self.memory.count(
+                    tags=self._enabled_labels, scope=MemoryScope.EPISODE, episode=self.episode_number
+                )
+                hidden = total - len(e_entries)
+                if hidden > 0:
+                    header += f"+{hidden} hidden due to limit"
             header += "):"
-            sections.append(f"{header}\n{episode}")
+            sections.append(f"{header}\n" + "\n".join(lines))
 
-        # Label controls (can change within episode)
-        persistent_stats = self._get_label_stats(MemoryScope.PERSISTENT)
-        episode_stats = self._get_label_stats(MemoryScope.EPISODE, episode=self.episode_number)
-        sections.append(self._format_label_controls(persistent_stats, episode_stats))
+        # Compute label stats from already-retrieved entries (no extra queries)
+        label_info = self._compute_label_summary(p_entries + e_entries)
+        if label_info:
+            sections.append(label_info)
 
-        # Current observation (changes every step)
         sections.append(current_content)
-
-        # Minimal action reminder (full instructions in system prompt)
         sections.append(self._get_action_instructions())
 
         return "\n\n".join(sections)
 
-    def _format_memory(
-        self, scope: MemoryScope, episode: int | None = None
-    ) -> tuple[str, int, int]:
-        """Format memory entries, return (formatted_str, shown_count, more_available)."""
-        filter_tags = self._enabled_labels  # None means all
-
-        entries = self.memory.retrieve(
-            tags=filter_tags, scope=scope, episode=episode, limit=self.max_memory_context
-        )
-        total = self.memory.count(tags=filter_tags, scope=scope, episode=episode)
-        more_available = total - len(entries)
-
+    def _compute_label_summary(self, entries: list[MemoryEntry]) -> str:
+        """Compute label summary from already-retrieved entries (no extra queries)."""
         if not entries:
-            return "", 0, more_available
-
-        parts = []
+            return ""
+        # Count tags from retrieved entries
+        tag_counts: dict[str, int] = {}
         for e in entries:
-            parts.append(f"[{e.entry_id}:p{e.priority}] ({e.tags}) {e.content}")
-        return "\n".join(parts), len(entries), more_available
+            for tag in e.tags.split(","):
+                tag = tag.strip()
+                if tag:
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
+        if not tag_counts:
+            return ""
+        tags_str = " ".join(f"{t}:{c}" for t, c in sorted(tag_counts.items()))
+        return f"[tags: {tags_str}]"
 
     def _get_action_instructions(self) -> str:
         """Minimal reminder - full instructions in system prompt."""
@@ -206,6 +210,13 @@ EFFICIENCY: content/tags for agent only - abbreviate freely.
         think_match = re.search(r"<think>(.*?)</think>", completion, re.DOTALL)
         reasoning = think_match.group(1).strip() if think_match else None
 
+        # Reset memory update counters and details
+        self._mem_adds = 0
+        self._mem_removes = 0
+        self._label_changes = False
+        self._added_entries = []
+        self._removed_ids = []
+
         mem_match = re.search(r"<memory_updates>(.*?)</memory_updates>", completion, re.DOTALL)
         if mem_match:
             self._process_memory_updates(mem_match.group(1))
@@ -215,6 +226,21 @@ EFFICIENCY: content/tags for agent only - abbreviate freely.
 
         if reasoning:
             self.prompt_builder.update_reasoning(reasoning)
+
+        # Log response to journal
+        self.journal.log_response(
+            action=action,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            reasoning=reasoning,
+        )
+        self.journal.log_memory_update(
+            adds=self._mem_adds,
+            removes=self._mem_removes,
+            label_changes=self._label_changes,
+            added_entries=self._added_entries if self._journal_memory_details else None,
+            removed_ids=self._removed_ids if self._journal_memory_details else None,
+        )
 
         return response._replace(reasoning=reasoning or completion, completion=action)
 
@@ -249,7 +275,7 @@ EFFICIENCY: content/tags for agent only - abbreviate freely.
 
                     scope = MemoryScope.EPISODE if scope_str == "episode" else MemoryScope.PERSISTENT
 
-                    self.memory.store(
+                    entry_id = self.memory.store(
                         MemoryEntry(
                             tags=tags,
                             content=content,
@@ -258,8 +284,17 @@ EFFICIENCY: content/tags for agent only - abbreviate freely.
                             source_episode=self.episode_number,
                         )
                     )
-            except json.JSONDecodeError:
-                logger.debug("Failed to parse memory additions")
+                    self._mem_adds += 1
+                    if self._journal_memory_details:
+                        self._added_entries.append({
+                            "id": entry_id,
+                            "scope": scope_str,
+                            "tags": tags,
+                            "prio": prio,
+                            "content": content,
+                        })
+            except (json.JSONDecodeError, ValueError):
+                self.journal.log_error("Failed to parse memory additions")
 
         # Parse removals (by ID)
         remove_match = re.search(r"remove:\s*\[(.+?)\]", mem_text, re.DOTALL)
@@ -269,8 +304,11 @@ EFFICIENCY: content/tags for agent only - abbreviate freely.
                 for entry_id in removals:
                     if isinstance(entry_id, str):
                         self.memory.remove(entry_id)
+                        self._mem_removes += 1
+                        if self._journal_memory_details:
+                            self._removed_ids.append(entry_id)
             except json.JSONDecodeError:
-                logger.debug("Failed to parse memory removals")
+                self.journal.log_error("Failed to parse memory removals")
 
         # Parse enable_labels
         enable_match = re.search(r"enable_labels:\s*\[(.+?)\]", mem_text, re.DOTALL)
@@ -284,8 +322,9 @@ EFFICIENCY: content/tags for agent only - abbreviate freely.
                         pass
                     else:
                         self._enabled_labels |= labels
+                    self._label_changes = True
             except json.JSONDecodeError:
-                logger.debug("Failed to parse enable_labels")
+                self.journal.log_error("Failed to parse enable_labels")
 
         # Parse disable_labels
         disable_match = re.search(r"disable_labels:\s*\[(.+?)\]", mem_text, re.DOTALL)
@@ -300,16 +339,19 @@ EFFICIENCY: content/tags for agent only - abbreviate freely.
                         self._enabled_labels = all_tags - labels
                     else:
                         self._enabled_labels -= labels
+                    self._label_changes = True
             except json.JSONDecodeError:
-                logger.debug("Failed to parse disable_labels")
+                self.journal.log_error("Failed to parse disable_labels")
 
         # Parse reset_labels
         reset_match = re.search(r"reset_labels:\s*(true|false)", mem_text, re.IGNORECASE)
         if reset_match and reset_match.group(1).lower() == "true":
             self._enabled_labels = None
+            self._label_changes = True
 
     def reset(self) -> None:
         """Reset for new episode. Episode memories and label filters reset."""
         super().reset()
         self.episode_number += 1
         self._enabled_labels = None  # Reset label filter each episode
+        self.journal.reset_episode(self.episode_number)
