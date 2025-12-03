@@ -22,6 +22,9 @@ class AgentStats:
     avg_latency_ms: float
     cache_read_tokens: int
     cache_create_tokens: int
+    single_actions: int
+    multi_actions: int
+    queued_actions: int
 
 
 @dataclass
@@ -202,7 +205,10 @@ class MonitorDB:
                       SUM(json_extract(data, '$.out_tok')) as total_out,
                       AVG(json_extract(data, '$.latency_ms')) as avg_latency,
                       SUM(json_extract(data, '$.cache_read')) as cache_read,
-                      SUM(json_extract(data, '$.cache_create')) as cache_create
+                      SUM(json_extract(data, '$.cache_create')) as cache_create,
+                      SUM(CASE WHEN json_extract(data, '$.action_type') = 'single' THEN 1 ELSE 0 END) as single_ct,
+                      SUM(CASE WHEN json_extract(data, '$.action_type') = 'multi' THEN 1 ELSE 0 END) as multi_ct,
+                      SUM(CASE WHEN json_extract(data, '$.action_type') = 'queued' THEN 1 ELSE 0 END) as queued_ct
                FROM journal WHERE worker_id = ? AND event = 'response'""",
             (worker_id,),
         ).fetchone()
@@ -214,6 +220,9 @@ class MonitorDB:
             avg_latency_ms=float(row["avg_latency"] or 0),
             cache_read_tokens=int(row["cache_read"] or 0),
             cache_create_tokens=int(row["cache_create"] or 0),
+            single_actions=int(row["single_ct"] or 0),
+            multi_actions=int(row["multi_ct"] or 0),
+            queued_actions=int(row["queued_ct"] or 0),
         )
 
     def get_memory_entries(

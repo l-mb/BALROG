@@ -305,9 +305,11 @@ class BraidStorage:
         cache_creation_tokens: int = 0,
         cache_read_tokens: int = 0,
         extended_thinking: str | None = None,
+        action_type: str = "single",  # "single", "multi", or "queued"
     ) -> None:
         data: dict[str, Any] = {
             "action": action,
+            "action_type": action_type,
             "latency_ms": latency_ms,
             "in_tok": input_tokens,
             "out_tok": output_tokens,

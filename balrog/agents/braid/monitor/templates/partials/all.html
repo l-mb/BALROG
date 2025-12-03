@@ -30,6 +30,8 @@
         <dd>{{ "{:,}".format(stats.cache_create_tokens) }}</dd>
         <dt>Avg Latency</dt>
         <dd>{{ "{:.1f}".format(stats.avg_latency_ms / 1000) }}s</dd>
+        <dt>Actions</dt>
+        <dd>{{ stats.single_actions }}s + {{ stats.multi_actions }}m + {{ stats.queued_actions }}q</dd>
       </dl>
       {% else %}
       <p class="muted">No stats</p>

@@ -21,6 +21,10 @@ class BRAIDAgent(BaseAgent):
     """
 
     _SYSTEM_PROMPT_SUFFIX = """
+Your long-term goal beyond this one playthrough is to get better at playing NetHack.
+
+You are scored on achieving certain milestones in the game, character level, dungeon depth, eventual ascension. You should strive to achieve those goals in an optimal number of turns without dying.
+
 ADDITIONAL INFORMATION BEFORE OBSERVATIONS:
 
 SOME MAP SYMBOLS:
@@ -54,13 +58,13 @@ Ill=sick(pray or cure), FoodPois=food poisoning(pray). Burdened/Stressed=carryin
 DUNGEON BRANCHES:
 Dungeons of Doom (main): levels 1-~26, goal is to descend
 Gnomish Mines: entrance ~lvl 2-4, has Minetown with shops, temples, perhaps better gear
-Sokoban: entrance ~lvl 5-9, puzzle branch with guaranteed useful items at end, can't move diagonally, solve carefully
+Sokoban: entrance ~lvl 5-9, puzzle branch with guaranteed useful items at end, can't move diagonally, boulders need to be pushed into pits, solve carefully with a plan
 Oracle: ~lvl 5-9, can consult for sometimes useful tips (costs gold)
 Castle: ~lvl 25, has wand of wishing in chest
 Gehennom: below Castle, fire and demons, working toward Amulet
 
 KEY STRATEGIES:
-- Elbereth: engrave in dust (E then write "Elbereth"). Most monsters won't attack you on it.
+- Elbereth: engrave in dust (E then write "Elbereth", possibly using a wand of fire etc). Most monsters won't attack you on it. Moving might harm it. Safe spot for stashes.
 - Altar sacrifice: kill monsters, offer corpses on aligned altar for favor and gifts (artifact weapons!), risky at non-aligned altars
 - Price ID: in shops, base prices can reveal item identity (e.g., 300zm scroll = identify)
 - Priests: Giving them gold (between 200 to 400 times player level) can grant intrinsic protection
@@ -72,7 +76,9 @@ KEY STRATEGIES:
 - Monsters could be invisible
 - Tinning has beneficial effects
 - Magic markers should be blessed, have or create blessed scrolls of charging
-- Explore efficiently, do not waste movements, avoid retracing steps
+- Explore and move efficiently, do not waste movements, avoid retracing steps
+- You can often move boulders, unless they're up against a dead end (wall, another boulder, or monster)
+- Once you have acquired the real Amulet of Yendor, you need to exit the Dungeon through the stairs up from level 1. Those elemental levels require careful preparation.
 
 EARLY GAME PRIORITIES:
 1. Find and equip any armor/weapons
@@ -102,7 +108,21 @@ add: [{"scope": "episode|persistent", "tags": "t1,t2", "prio": 5, "content": "..
 remove: ["entry_id"]
 enable_tags: ["tag"] | disable_tags: ["tag"] | reset_tags: true
 </memory_updates>
-3. REQUIRED action: <|ACTION|>your_action<|END|>
+3. REQUIRED action - single action from system prompt OR multi-action sequence:
+   Single: <|ACTION|>your_action<|END|>
+   Multi:  <|ACTIONS|>
+           action1
+           action2
+           action3
+           <|END|>
+
+MULTI-ACTION GUIDELINES:
+- Allows for more efficient and cost-effective playthroughs. Prioritize use when possible!
+- Use for: navigation sequences, repeated searches, search + navigation combos, safe routes
+- You can issue multiple move commands even in unknown paths. If it's a deadend, you'll simply stop.
+- Avoid for: combat, unknown areas, low HP, when you need feedback
+- Queue aborts automatically on: combat, prompts requiring response, HP drop, traps
+- When unsure, use single action to get feedback first
 
 MEMORY:
 - scope: episode (cleared each ep) | persistent (survives)
@@ -118,7 +138,7 @@ HINTS FOR MEMORY USE:
 - Use episode memory for tracking exploration, stashes, plans, etc: anything that is only for this particular playthrough attempt
 - Use persistent memory to learn permanently and across runs, both tactically and strategically or meta attributes such as tagging strategy for memory, supplementing and overriding system prompt hints for play
 - Remove outdated entries to focus better.
-- Your long-term goal beyond this one playthrough is to get good at playing NetHack!
+- Do not duplicate content.
 
 None of your thinking needs to be human readable. Encode as much signal as possible in a terse format and language entirely at your discretion, as long as the response format is maintained.
 
@@ -163,6 +183,10 @@ Memories are provided to you later.
         self._added_entries: list[dict[str, Any]] = []
         self._removed_ids: list[str] = []
 
+        # Multi-action queue state
+        self._action_queue: list[str] = []
+        self._queue_start_hp: int | None = None
+
     def build_system_prompt(self, env_instruction: str) -> str:
         """Append BRAID response format instructions to environment prompt."""
         return f"{env_instruction}\n\n{self._SYSTEM_PROMPT_SUFFIX}"
@@ -190,6 +214,37 @@ Memories are provided to you later.
         if prev_action:
             self.prompt_builder.update_action(prev_action)
 
+        # Check action queue first - return queued action if available and safe
+        if self._action_queue:
+            if self._should_abort_queue(obs):
+                self.storage.log_error(
+                    self.episode_number, self._step,
+                    f"Queue aborted ({len(self._action_queue)} actions remaining)"
+                )
+                self._action_queue.clear()
+                self._queue_start_hp = None
+            else:
+                self._step += 1
+                action_response = self._pop_queued_action()
+                # Log queued action
+                self.storage.log_response(
+                    episode=self.episode_number,
+                    step=self._step,
+                    action=action_response.completion,
+                    latency_ms=0,
+                    input_tokens=0,
+                    output_tokens=0,
+                    ep_input_tokens=self._episode_input_tokens,
+                    ep_output_tokens=self._episode_output_tokens,
+                    total_input_tokens=self._cumulative_input_tokens,
+                    total_output_tokens=self._cumulative_output_tokens,
+                    reasoning=action_response.reasoning,
+                    cache_creation_tokens=0,
+                    cache_read_tokens=0,
+                    action_type="queued",
+                )
+                return action_response
+
         self.prompt_builder.update_observation(obs)
         messages = self.prompt_builder.get_prompt()
 
@@ -216,7 +271,13 @@ Memories are provided to you later.
         )
 
         response = self.client.generate(messages)
-        return self._parse_response(response)
+        parsed = self._parse_response(response)
+
+        # If queue was populated, track HP for abort detection
+        if self._action_queue:
+            self._queue_start_hp = self._extract_hp(obs)
+
+        return parsed
 
     def _build_enhanced_prompt(self, current_content: str) -> str:
         """Build prompt optimized for cache hits and minimal queries."""
@@ -313,8 +374,13 @@ Memories are provided to you later.
         if mem_match:
             self._process_memory_updates(mem_match.group(1))
 
-        action_match = re.search(r"<\|ACTION\|>(.*?)<\|END\|>", completion, re.DOTALL)
-        action = action_match.group(1).strip() if action_match else self._fallback_action(completion)
+        # Parse actions (single or multi)
+        actions = self._parse_multi_actions(completion)
+        action = actions[0]
+
+        # Queue remaining actions if multi-action response
+        if len(actions) > 1:
+            self._action_queue = actions[1:]
 
         if reasoning:
             self.prompt_builder.update_reasoning(reasoning)
@@ -335,6 +401,7 @@ Memories are provided to you later.
             cache_creation_tokens=getattr(response, "cache_creation_tokens", 0) or 0,
             cache_read_tokens=getattr(response, "cache_read_tokens", 0) or 0,
             extended_thinking=getattr(response, "extended_thinking", None),
+            action_type="multi" if len(actions) > 1 else "single",
         )
 
         # Log memory updates
@@ -380,6 +447,106 @@ Memories are provided to you later.
             f"No action found, defaulting to 'esc'. Response: {completion[:100]}"
         )
         return "esc"
+
+    # --- Multi-action queue support ---
+
+    def _is_interactive_prompt(self, text: str) -> bool:
+        """Detect if game is waiting for specific input (not a queued action)."""
+        # Choice brackets at end of message: [abc or ?*], [yn], [ynq], etc.
+        if re.search(r"\[[a-zA-Z0-9\s\?\*\-]+\]\s*$", text):
+            return True
+        # Direction prompt
+        if "In what direction" in text:
+            return True
+        # Quantity prompt
+        if "How many" in text:
+            return True
+        # Confirmation questions
+        if re.search(r"(Really|Are you sure|Continue)\s*\?", text, re.IGNORECASE):
+            return True
+        return False
+
+    def _should_abort_queue(self, obs: dict[str, Any]) -> bool:
+        """Check if action queue should be aborted based on observation."""
+        if not self._action_queue:
+            return False
+
+        text = obs.get("text", {}).get("long_term_context", "")
+
+        # Abort on interactive prompts
+        if self._is_interactive_prompt(text):
+            return True
+
+        # Abort on combat indicators
+        combat_patterns = ["hits", "misses", "bites", "attacks", "throws", "swings"]
+        if any(p in text.lower() for p in combat_patterns):
+            return True
+
+        # Abort on significant HP drop (>20% since queue started)
+        if self._queue_start_hp:
+            current_hp = self._extract_hp(obs)
+            if current_hp is not None and current_hp < self._queue_start_hp * 0.8:
+                return True
+
+        # Abort on danger indicators
+        danger_patterns = ["trap", "cursed", "poisoned", "confused", "blind", "stuck", "paralyzed"]
+        if any(p in text.lower() for p in danger_patterns):
+            return True
+
+        return False
+
+    def _extract_hp(self, obs: dict[str, Any]) -> int | None:
+        """Extract current HP from observation."""
+        # Try blstats first (raw NLE observation)
+        raw_obs = obs.get("obs")
+        if isinstance(raw_obs, dict):
+            blstats = raw_obs.get("blstats")
+            if blstats is not None:
+                try:
+                    # blstats[10] is typically HP in NLE
+                    return int(blstats[10])
+                except (IndexError, TypeError, ValueError):
+                    pass
+        # Fallback: parse from text
+        text = obs.get("text", {}).get("short_term_context", "")
+        hp_match = re.search(r"HP:(\d+)", text)
+        if hp_match:
+            return int(hp_match.group(1))
+        return None
+
+    def _parse_multi_actions(self, completion: str) -> list[str]:
+        """Parse single action or multi-action block from completion."""
+        # Check for <|ACTIONS|>...<|END|> block (multi-action)
+        multi_match = re.search(r"<\|ACTIONS\|>(.*?)<\|END\|>", completion, re.DOTALL)
+        if multi_match:
+            actions = [a.strip() for a in multi_match.group(1).strip().split("\n") if a.strip()]
+            return actions if actions else [self._fallback_action(completion)]
+
+        # Check for single <|ACTION|>...<|END|> (normal case)
+        single_match = re.search(r"<\|ACTION\|>(.*?)<\|END\|>", completion, re.DOTALL)
+        if single_match:
+            return [single_match.group(1).strip()]
+
+        # Fallback
+        return [self._fallback_action(completion)]
+
+    def _pop_queued_action(self) -> LLMResponse:
+        """Return next queued action without LLM call."""
+        action = self._action_queue.pop(0)
+        remaining = len(self._action_queue)
+
+        # Clear queue state if exhausted
+        if not self._action_queue:
+            self._queue_start_hp = None
+
+        return LLMResponse(
+            model_id="queued",
+            completion=action,
+            stop_reason="queued",
+            input_tokens=0,
+            output_tokens=0,
+            reasoning=f"[Queued: {remaining} remaining]",
+        )
 
     def _process_memory_updates(self, mem_text: str) -> None:
         """Parse and apply memory updates from LLM response."""
@@ -480,4 +647,6 @@ Memories are provided to you later.
         self._enabled_tags = None
         self._episode_input_tokens = 0
         self._episode_output_tokens = 0
+        self._action_queue.clear()
+        self._queue_start_hp = None
         self.storage.log_reset(self.episode_number)
