@@ -32,6 +32,8 @@ class AgentStats:
     persistent_mem_removes: int
     # Reasoning stats
     think_count: int
+    # Compute helper stats
+    compute_count: int  # Number of responses with compute requests
 
 
 @dataclass
@@ -194,6 +196,7 @@ class MonitorDB:
                     "reasoning": data.get("reasoning"),
                     "action_type": data.get("action_type", "single"),
                     "latency_ms": data.get("latency_ms", 0),
+                    "compute_requests": data.get("compute_requests"),
                 })
         return responses
 
@@ -204,6 +207,31 @@ class MonitorDB:
             (worker_id,),
         ).fetchone()
         return row["max_step"] or 0
+
+    def get_latest_compute(self, worker_id: str, max_step: int | None = None) -> dict | None:
+        """Get the latest compute request/result for an agent."""
+        if max_step is not None:
+            row = self.conn.execute(
+                """SELECT step, data FROM journal
+                   WHERE worker_id = ? AND event = 'compute' AND step <= ?
+                   ORDER BY id DESC LIMIT 1""",
+                (worker_id, max_step),
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                """SELECT step, data FROM journal
+                   WHERE worker_id = ? AND event = 'compute'
+                   ORDER BY id DESC LIMIT 1""",
+                (worker_id,),
+            ).fetchone()
+        if row and row["data"]:
+            data = json.loads(row["data"])
+            return {
+                "step": row["step"],
+                "requests": data.get("requests", []),
+                "results": data.get("results", []),
+            }
+        return None
 
     def get_stats(self, worker_id: str) -> AgentStats:
         """Get aggregate stats for an agent."""
@@ -218,7 +246,8 @@ class MonitorDB:
                       SUM(CASE WHEN json_extract(data, '$.action_type') = 'single' THEN 1 ELSE 0 END) as single_ct,
                       SUM(CASE WHEN json_extract(data, '$.action_type') = 'multi' THEN 1 ELSE 0 END) as multi_ct,
                       SUM(CASE WHEN json_extract(data, '$.action_type') = 'queued' THEN 1 ELSE 0 END) as queued_ct,
-                      SUM(CASE WHEN json_extract(data, '$.reasoning') IS NOT NULL THEN 1 ELSE 0 END) as think_ct
+                      SUM(CASE WHEN json_extract(data, '$.reasoning') IS NOT NULL THEN 1 ELSE 0 END) as think_ct,
+                      SUM(CASE WHEN json_extract(data, '$.compute_requests') IS NOT NULL THEN 1 ELSE 0 END) as compute_ct
                FROM journal WHERE worker_id = ? AND event = 'response'""",
             (worker_id,),
         ).fetchone()
@@ -247,6 +276,7 @@ class MonitorDB:
             persistent_mem_adds=int(mem["p_adds"] or 0),
             persistent_mem_removes=int(mem["p_removes"] or 0),
             think_count=int(resp["think_ct"] or 0),
+            compute_count=int(resp["compute_ct"] or 0),
         )
 
     def get_memory_entries(

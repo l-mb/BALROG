@@ -42,7 +42,7 @@ EXPLORATION PROTOCOL (follow this to avoid wandering):
 3. At dead-end: search 3-4x, then mark as "searched" and backtrack to last junction
 4. At junction: mark new exits as frontier, continue to next unexplored
 5. NEVER revisit explored areas - check "blocked", "searched", "frontier" tags first
-6. Use "far " prefix for efficient travel through explored corridors
+6. Use "far " prefix to travel as far as possible in a possible direction
 7. When all frontiers exhausted: level explored, find stairs down
 8. In rare circumstances, dungeon features CAN disappear or change. Or you might have misclassified in the past. Surrounding map takes precedence over memories. Update memories.
 
@@ -93,6 +93,19 @@ east
 far south
 <|END|>
 
+NAVIGATION HELPERS (explored areas only):
+<compute>
+distance: @x1,y1 -> @x2,y2     # Manhattan distance
+nearest: stairs|altar|fountain  # Find closest known feature
+pathfind: @x1,y1 -> @x2,y2     # Direction sequence through explored
+travel_to: @x,y                 # Auto-execute path (replaces your action)
+</compute>
+
+Results appear next turn as [COMPUTE]. Helpers ONLY work on explored tiles.
+Prioritize "travel_to" for efficient movement to known target locations.
+Use pathfind to plan routes.
+Features: stairs_down, stairs_up, stairs, altar, fountain, sink, throne
+
 MEMORY SYSTEM:
 - scope: episode (this run only) | persistent (survives across runs)
 - prio: 1-9, higher shown first (default 5). Max 256 chars per entry.
@@ -134,6 +147,10 @@ SINK (tag: "sink,lvl:{N}", prio: 7):
 FOUNTAIN (tag: "fountain,lvl:{N}", prio: 6):
   Format: "@{x},{y}" - fountain location
   Useful for Excalibur (lawful+longsword), or random effects.
+
+THRONE (tag: "throne,lvl:{N}", prio: 6):
+  Format: "@{x},{y}" - throne location
+  Sitting on thrones can grant wishes or have other effects.
 
 SHOP (tag: "shop,lvl:{N}", prio: 7):
   Format: "@{x},{y} {type}" - shop location and type (general, armor, weapon, etc.)
@@ -188,9 +205,7 @@ None of your thinking, reply, or memory needs to be readable by or meaningful to
 
 At each turn, you are provided with this prompt, the previous observations and your past actions, the memory entries for enabled tags, and the current observation (map screenshot).
 
-Important: that the language observation is an incomplete rendering of the map meant to augment weaker LLMs, and may appear to contradict the map. Actual ASCII map takes precedence.
-
-You MUST end with a valid single ACTION or multi ACTIONS sequence.
+You MUST end with a valid single ACTION, multi ACTIONS sequence, OR a compute "travel_to" statement.
 
 """.strip()
 
@@ -241,6 +256,11 @@ You MUST end with a valid single ACTION or multi ACTIONS sequence.
         self._max_extended_thinking_chars = braid_cfg.get("max_extended_thinking_chars", 8000)
         self._last_extended_thinking: str | None = None
 
+        # Compute helpers state
+        self._enable_compute = braid_cfg.get("enable_compute_helpers", True)
+        self._pending_compute: list[str] = []
+        self._compute_result: str | None = None
+
     def build_system_prompt(self, env_instruction: str) -> str:
         """Append BRAID response format instructions to environment prompt."""
         return f"{env_instruction}\n\n{self._SYSTEM_PROMPT_SUFFIX}"
@@ -267,6 +287,9 @@ You MUST end with a valid single ACTION or multi ACTIONS sequence.
     def act(self, obs: dict[str, Any], prev_action: str | None = None) -> LLMResponse:
         if prev_action:
             self.prompt_builder.update_action(prev_action)
+
+        # Process any pending compute requests from last turn
+        self._process_pending_compute(obs)
 
         # Check action queue first - return queued action if available and safe
         if self._action_queue:
@@ -377,6 +400,11 @@ You MUST end with a valid single ACTION or multi ACTIONS sequence.
         if self._preserve_extended_thinking and self._last_extended_thinking:
             sections.append(f"PREVIOUS REASONING (from last turn):\n{self._last_extended_thinking}")
 
+        # Inject compute results if available
+        if self._compute_result:
+            sections.append(self._compute_result)
+            self._compute_result = None
+
         sections.append(current_content)
 
         return "\n\n".join(sections)
@@ -433,6 +461,16 @@ You MUST end with a valid single ACTION or multi ACTIONS sequence.
         if mem_match:
             self._process_memory_updates(mem_match.group(1))
 
+        # Parse compute requests
+        if self._enable_compute:
+            compute_match = re.search(r"<compute>(.*?)</compute>", completion, re.DOTALL)
+            if compute_match:
+                self._pending_compute = [
+                    line.strip()
+                    for line in compute_match.group(1).strip().split("\n")
+                    if line.strip()
+                ]
+
         # Parse actions (single or multi)
         actions = self._parse_multi_actions(completion)
         action = actions[0]
@@ -461,6 +499,7 @@ You MUST end with a valid single ACTION or multi ACTIONS sequence.
             cache_read_tokens=getattr(response, "cache_read_tokens", 0) or 0,
             extended_thinking=getattr(response, "extended_thinking", None),
             action_type="multi" if len(actions) > 1 else "single",
+            compute_requests=self._pending_compute if self._pending_compute else None,
         )
 
         # Store extended thinking for next turn if enabled
@@ -586,6 +625,82 @@ You MUST end with a valid single ACTION or multi ACTIONS sequence.
         if hp_match:
             return int(hp_match.group(1))
         return None
+
+    def _process_pending_compute(self, obs: dict[str, Any]) -> None:
+        """Execute pending compute requests using current observation."""
+        if not self._pending_compute:
+            return
+
+        from .compute.navigation import distance, get_position, nearest, pathfind
+
+        raw_obs = obs.get("obs", {})
+        glyphs = raw_obs.get("glyphs") if isinstance(raw_obs, dict) else None
+        blstats = raw_obs.get("blstats") if isinstance(raw_obs, dict) else None
+
+        if glyphs is None or blstats is None:
+            self._compute_result = "[COMPUTE] ERROR: No glyph data available"
+            self._pending_compute = []
+            return
+
+        pos = get_position(blstats)
+        results = []
+
+        for request in self._pending_compute:
+            if request.startswith("distance:"):
+                match = re.match(r"distance:\s*@(\d+),(\d+)\s*->\s*@(\d+),(\d+)", request)
+                if match:
+                    x1, y1, x2, y2 = map(int, match.groups())
+                    d = distance(x1, y1, x2, y2)
+                    results.append(f"distance: @{x1},{y1} -> @{x2},{y2} = {d} tiles")
+                else:
+                    results.append("distance: PARSE ERROR")
+
+            elif request.startswith("nearest:"):
+                feature = request.split(":", 1)[1].strip()
+                result = nearest(glyphs, pos, feature)
+                if result:
+                    x, y, d = result
+                    results.append(f"nearest: {feature} = @{x},{y} ({d} tiles)")
+                else:
+                    results.append(f"nearest: {feature} = NOT FOUND in explored areas")
+
+            elif request.startswith("pathfind:"):
+                match = re.match(r"pathfind:\s*@(\d+),(\d+)\s*->\s*@(\d+),(\d+)", request)
+                if match:
+                    x1, y1, x2, y2 = map(int, match.groups())
+                    path = pathfind(glyphs, (x1, y1), (x2, y2))
+                    if path:
+                        dirs = " ".join(path)
+                        results.append(
+                            f"pathfind: @{x1},{y1} -> @{x2},{y2} = {dirs} ({len(path)} moves)"
+                        )
+                    else:
+                        results.append(
+                            f"pathfind: @{x1},{y1} -> @{x2},{y2} = NO PATH (unexplored/blocked)"
+                        )
+                else:
+                    results.append("pathfind: PARSE ERROR")
+
+            elif request.startswith("travel_to:"):
+                match = re.match(r"travel_to:\s*@(\d+),(\d+)", request)
+                if match:
+                    gx, gy = map(int, match.groups())
+                    path = pathfind(glyphs, pos, (gx, gy))
+                    if path:
+                        self._action_queue = path
+                        self._queue_start_hp = self._extract_hp(obs)
+                        dirs = " ".join(path)
+                        results.append(f"travel_to: @{gx},{gy} = QUEUED {len(path)} moves ({dirs})")
+                    else:
+                        results.append(f"travel_to: @{gx},{gy} = NO PATH (unexplored/blocked)")
+                else:
+                    results.append("travel_to: PARSE ERROR")
+
+            else:
+                results.append(f"UNKNOWN: {request}")
+
+        self._compute_result = "[COMPUTE]\n" + "\n".join(results)
+        self._pending_compute = []
 
     def _parse_multi_actions(self, completion: str) -> list[str]:
         """Parse single action or multi-action block from completion."""

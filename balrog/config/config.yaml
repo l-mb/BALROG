@@ -14,6 +14,7 @@ agent:
     log_memory_details: false   # Log what was added/removed in memory updates
     preserve_extended_thinking: false  # Inject previous extended thinking into prompt
     max_extended_thinking_chars: 8000  # Truncation limit for preserved thinking
+    enable_compute_helpers: true       # Enable navigation helpers (pathfind, nearest, travel_to)
 
 eval:
   output_dir: "results"  # Directory where evaluation results will be saved
@@ -57,6 +58,7 @@ envs:
     savedir: null               # Directory to save NLE data; null disables saving
     save_ttyrec_every: 0        # Frequency of saving TTY recordings
     skip_more: True            # Whether to skip the 'more' prompt in NLE
+    prompt_mode: map_only       # Prompt mode: hybrid (with language obs), map_only (no language obs)
   minihack_kwargs: 
     character: "@"
     max_episode_steps: 100

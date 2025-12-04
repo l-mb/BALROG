@@ -312,6 +312,7 @@ class BraidStorage:
         cache_read_tokens: int = 0,
         extended_thinking: str | None = None,
         action_type: str = "single",  # "single", "multi", or "queued"
+        compute_requests: list[str] | None = None,
     ) -> None:
         data: dict[str, Any] = {
             "action": action,
@@ -331,6 +332,8 @@ class BraidStorage:
             data["cache_read"] = cache_read_tokens
         if extended_thinking:
             data["extended_thinking"] = extended_thinking
+        if compute_requests:
+            data["compute_requests"] = compute_requests
         self._log(episode, step, "response", data)
 
     def log_memory_update(
@@ -366,3 +369,15 @@ class BraidStorage:
 
     def log_error(self, episode: int, step: int, error: str) -> None:
         self._log(episode, step, "error", {"error": error})
+
+    def log_compute(
+        self,
+        episode: int,
+        step: int,
+        requests: list[str],
+        results: list[str],
+    ) -> None:
+        """Log compute helper requests and results."""
+        if not requests:
+            return
+        self._log(episode, step, "compute", {"requests": requests, "results": results})

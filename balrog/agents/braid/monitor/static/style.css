@@ -118,6 +118,16 @@
     font-weight: bold;
 }
 
+.compute-tag {
+    display: inline-block;
+    font-size: 0.5rem;
+    padding: 0.1rem 0.2rem;
+    margin-top: 0.1rem;
+    background: #1abc9c;
+    color: white;
+    border-radius: 3px;
+}
+
 .col-reasoning {
     width: auto;
 }
@@ -422,6 +432,10 @@ article header {
 
 .debug-role-thinking {
     border-left-color: #9b59b6;
+}
+
+.debug-role-compute {
+    border-left-color: #1abc9c;
 }
 
 /* Responsive */

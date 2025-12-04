@@ -79,8 +79,11 @@
                 {% for r in responses %}
                 <tr>
                   <td class="col-step">{{ r.step }}</td>
-                  <td class="col-action">{{ r.action|default('?', true) }}</td>
-                  <td class="col-reasoning"><pre>{% if r.action_type == 'queued' %}(queued){% elif r.reasoning %}{{ r.reasoning }}{% else %}(no reasoning){% endif %}</pre></td>
+                  <td class="col-action"><code>{{ r.action|default('?', true) }}</code>{% if r.compute_requests %}<br><span class="compute-tag">+compute</span>{% endif %}</td>
+                  <td class="col-reasoning"><pre>{% if r.action_type == 'queued' %}(queued){% elif r.reasoning %}{{ r.reasoning }}{% else %}(no reasoning){% endif %}{% if r.compute_requests %}
+---
+{% for req in r.compute_requests %}{{ req }}
+{% endfor %}{% endif %}</pre></td>
                 </tr>
                 {% endfor %}
               </tbody>
@@ -115,6 +118,8 @@
             <dd>+{{ stats.episode_mem_adds }}/-{{ stats.episode_mem_removes }}e, +{{ stats.persistent_mem_adds }}/-{{ stats.persistent_mem_removes }}p</dd>
             <dt>Think</dt>
             <dd>{{ stats.think_count }}/{{ stats.single_actions + stats.multi_actions }} ({{ "{:.0f}".format(100 * stats.think_count / (stats.single_actions + stats.multi_actions)) if (stats.single_actions + stats.multi_actions) else 0 }}%)</dd>
+            <dt>Compute</dt>
+            <dd>{{ stats.compute_count }}</dd>
           </dl>
           {% else %}
           <p class="muted">No stats</p>
