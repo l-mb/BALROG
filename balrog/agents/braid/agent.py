@@ -49,62 +49,45 @@ EXPLORATION PROTOCOL (follow this to avoid wandering):
 APPLY YOUR NETHACK KNOWLEDGE. Discover rules through play and store them as persistent memory.
 
 RESPONSE FORMAT (all parts in single response):
-1. Optional thinking if situation requires it according to your judgment: <think>terse analysis</think>
-2. Optional memory updates to optimize future actions:
-<memory_updates>
-add: [{"scope": "episode|persistent", "tags": "t1,t2", "prio": 5, "content": "..."}]
-remove: ["entry_id"]
-enable_tags: ["tag"] | disable_tags: ["tag"] | reset_tags: true
-</memory_updates>
-3. REQUIRED action - single action from system prompt OR multi-action sequence:
-   Single: <|ACTION|>your_action<|END|>
-   Multi:  <|ACTIONS|>
-           action1
-           action2
-           action3
-           <|END|>
+1. Optional: <think>terse analysis</think>
+2. Optional: <memory_updates>...</memory_updates>
+3. REQUIRED - ONE of the following:
 
-MULTI-ACTION GUIDELINES:
-- Efficient and cost-effective. Prioritize use! Queue aborts on combat/prompts/HP drop/traps.
-- Avoid for: combat, low HP.
+OPTION A - Single action:
+<|ACTION|>direction or command<|END|>
 
-Example - repeated search at dead-end:
+OPTION B - Multi-action queue (aborts on combat/HP drop):
 <|ACTIONS|>
-search
+action1
+action2
+<|END|>
+
+OPTION C - Compute helper (for navigation through EXPLORED areas):
+<|COMPUTE|>travel_to: @x,y<|END|>
+
+The travel_to helper auto-paths to target through explored tiles. Use it!
+Example: to return to stairs at @45,12: <|COMPUTE|>travel_to: @45,12<|END|>
+
+Other compute commands (can combine multiple per block):
+<|COMPUTE|>
+nearest: stairs_down
+distance: @10,5 -> @25,15
+pathfind: @10,5 -> @25,15
+<|END|>
+Results appear next turn as [COMPUTE]. Features: stairs_down, stairs_up, altar, fountain, sink, throne
+
+MULTI-ACTION EXAMPLES:
+<|ACTIONS|>
 search
 search
 search
 <|END|>
 
-Example - move along corridor with search:
 <|ACTIONS|>
 north
 search
 north
-search
-north
 <|END|>
-
-Example - travel known safe path:
-<|ACTIONS|>
-far north
-east
-east
-far south
-<|END|>
-
-NAVIGATION HELPERS (explored areas only):
-<compute>
-distance: @x1,y1 -> @x2,y2     # Manhattan distance
-nearest: stairs|altar|fountain  # Find closest known feature
-pathfind: @x1,y1 -> @x2,y2     # Direction sequence through explored
-travel_to: @x,y                 # Auto-execute path (replaces your action)
-</compute>
-
-Results appear next turn as [COMPUTE]. Helpers ONLY work on explored tiles.
-Prioritize "travel_to" for efficient movement to known target locations.
-Use pathfind to plan routes.
-Features: stairs_down, stairs_up, stairs, altar, fountain, sink, throne
 
 MEMORY SYSTEM:
 - scope: episode (this run only) | persistent (survives across runs)
@@ -205,7 +188,7 @@ None of your thinking, reply, or memory needs to be readable by or meaningful to
 
 At each turn, you are provided with this prompt, the previous observations and your past actions, the memory entries for enabled tags, and the current observation (map screenshot).
 
-You MUST end with a valid single ACTION, multi ACTIONS sequence, OR a compute "travel_to" statement.
+You MUST end with exactly ONE of: <|ACTION|>...<|END|> OR <|ACTIONS|>...<|END|> OR <|COMPUTE|>...<|END|>
 
 """.strip()
 
@@ -463,7 +446,7 @@ You MUST end with a valid single ACTION, multi ACTIONS sequence, OR a compute "t
 
         # Parse compute requests
         if self._enable_compute:
-            compute_match = re.search(r"<compute>(.*?)</compute>", completion, re.DOTALL)
+            compute_match = re.search(r"<\|COMPUTE\|>(.*?)<\|END\|>", completion, re.DOTALL)
             if compute_match:
                 self._pending_compute = [
                     line.strip()
