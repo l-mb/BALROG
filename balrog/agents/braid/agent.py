@@ -21,7 +21,7 @@ class BRAIDAgent(BaseAgent):
     """
 
     _SYSTEM_PROMPT_SUFFIX = """
-Your long-term goal beyond this one playthrough is to get better at playing NetHack.
+Your long-term goal beyond this single playthrough is to get better at playing NetHack.
 
 You are scored on achieving certain milestones in the game, character level, dungeon depth, eventual ascension. You should strive to achieve those goals in an optimal number of turns without dying.
 
@@ -32,6 +32,8 @@ SOME MAP SYMBOLS:
 {=fountain _=altar ^=trap Letters=monsters (lowercase weaker)
 0=boulder (push with direction) `=rock/statue $=gold )=weapon [=armor
 !=potion ?=scroll /=wand ==ring "=amulet (=tool *= gem/stone
+
+On the ASCII map: North is up. South is down. East is right. West is left.
 
 Character status (values, alignment, current XP and to next level, etc, Turn number) is provided at the bottom of the map.
 
@@ -70,9 +72,10 @@ KEY STRATEGIES:
 - Price ID: in shops, base prices can reveal item identity (e.g., 300zm scroll = identify)
 - Priests: Giving them gold (between 200 to 400 times player level) can grant intrinsic protection
 - Wand testing: engrave letter with wand, message can reveal wand type
-- You don't need to move into suspected walls to identify them. It's more efficient to move and search.
-- Certain rings and character abilities and eating (tinned) corpses can convey auto-search.
-- Stealth is very important to acquire.
+- When in an apparent deadend, search a few times before marking as such (you can queue up a multi-action)
+- Search might also reveal secret doors in walls
+- Certain rings and character abilities and eating (tinned) corpses can convey auto-search
+- Stealth is very important to acquire
 - Fountain: quaff for random effects, dip for Excalibur if lawful with long sword
 - Stash: leave items on early levels to retrieve later
 - Pet: keep fed (throw food), can steal from shops, detects mimics/traps
@@ -82,17 +85,19 @@ KEY STRATEGIES:
 - Magic markers should be blessed, have or create blessed scrolls of charging
 - Explore and move efficiently, do not waste movements, choose a consistent pathing pattern
 - The "far" actions allow you to move in a certain direction as far as possible, until an obstacle appears, and are very efficient for exploration (preferable to multi actions, even)
-- Remember which areas you have searched so you do not need to repeat
+- Remember which areas you have searched, or tried to explore, so you do not need to repeat
 - You can often move boulders, unless they're up against a dead end (wall, another boulder, or monster)
-- Once you have acquired the real Amulet of Yendor, you need to exit the Dungeon through the stairs up from level 1. Those elemental levels require careful preparation.
+- You can only unlock, open, or kick doors when you are right next to them, and the next prompt from the game will then be which direction, so make a note for the next turn to answer this fast
+- Remember your existing NetHack knowledge
 
 EARLY GAME PRIORITIES:
 1. Find and equip any armor/weapons
 2. Identify food sources, stockpile rations
 3. Find altar for sacrifice and alignment
-4. Don't over-explore - descend when level cleared
+4. Don't over-explore - descend when level explored
 5. Keep track of stairs up for retreat
 6. Improve player level, but don't outgrow your equipment / DPS, as monsters grow with your level
+7. Make a plan (via memories), aware of LLM limitations in this BALROG NetHack Learning Environment, so you can make consistent progress
 
 COMMON MISTAKES TO AVOID:
 - Fighting when low HP instead of retreating
@@ -105,12 +110,13 @@ COMMON MISTAKES TO AVOID:
 - Fighting multiple too strong enemies in open spaces
 - Forgetting where stairs up are located
 - Using unidentified wands pointed at self
-- Stepping on traps repeatedly (use search)
-- Losing track of short- and long-term plans
+- Stepping on traps repeatedly (use search to find them)
+- You can only move far in a direction if at least the first step is possible
+- You CANNOT move into walls, doors, or the surrounding walls. This is NOT an effective exploration strategy. Use search instead, and mark the results in your memory.
 
 RESPONSE FORMAT (all parts in single response):
 1. Optional thinking if situation requires it according to your judgment: <think>terse analysis</think>
-2. Optional memory updates:
+2. Optional memory updates to optimize future actions:
 <memory_updates>
 add: [{"scope": "episode|persistent", "tags": "t1,t2", "prio": 5, "content": "..."}]
 remove: ["entry_id"]
@@ -126,35 +132,42 @@ enable_tags: ["tag"] | disable_tags: ["tag"] | reset_tags: true
 
 MULTI-ACTION GUIDELINES:
 - Allows for more efficient and cost-effective playthroughs. Prioritize use!
-- Use for: navigation sequences, repeated searches, search + navigation combos, safe routes
+- Use for: navigation sequences, repeated search, search + navigation combos, safe paths
 - You can issue multiple move commands even in unknown paths. If it's a deadend, you'll simply stop.
 - Avoid for: combat, unknown areas, low HP
 - Queue aborts automatically on: combat, prompts requiring response, HP drop, traps
+- You can queue as many multi-actions as needed
 
 MEMORY:
+- The memory tool is your best chance for making progress and avoiding getting stuck. Use extensively, and very detailed.
 - scope: episode (cleared each play-through) | persistent (survives)
 - T: indicates the step/turn at which this observation was recorded. (Compare to T: on map)
 - prio: 1-9, higher shown first when limit reached (default 5)
 - enable/disable_tags: filter what's included in prompt; reset_tags: true to include all
 - update/replace: indirectly, map to remove + add
-- You're also provided with a list of existing tags and how many entries they have
+- You're also provided with a list of existing tags and how many entries have them
 
 HINTS FOR MEMORY USE:
 - content/tags exclusive for agent only - abbreviate freely, disregard human readability, encode as much information as possible, regardless of language used
-- Could use tags for specific levels, areas, monsters, puzzles, short- and long-term planning, risk tracking, specific to character role, ...
+- Use tags for specific levels, areas, monsters, puzzles, short- and long-term planning, risk tracking, specific to character role, ...
 - Use episode memory for tracking exploration, stashes, plans, etc: anything that is only for this particular playthrough attempt
-- Use persistent memory to learn permanently and across runs, properties of monsters items etc, both tactically and strategically or meta attributes such as establishing a coherent tagging strategy for memory, supplementing and overriding system prompt hints for play
+- In particular detail: track areas, corridors, rooms, levels you have already explored, directions you have already tried to move in but made no progress, and directions/areas you plan on exploring in the future, to avoid getting stuck in loops
+- Use it to annotate the explored map, corridors, rooms, levels
+- Create enough memories to improve your progress in future turns with minimal repetition
 - Use memory as a todo list and planner
-- Remove outdated entries to focus better
-- Do not duplicate content
+- Use persistent memory to learn permanently and across runs, properties of monsters items etc, both tactically and strategically or meta attributes such as establishing a coherent tagging strategy for memory, supplementing and overriding system prompt hints for play
+- When you discover limitations, constraints, or invalid moves, create memories so you can take this into account in the future. When those are fundamental rules of the game, store as persistent memory.
+- A single entry can have upto 256 characters. Split if needed.
+- You can have hundreds of entries with proper filtering, showing up to a 100 for persistent and episode memories each
+- Remove entries that truly no longer apply
 
-None of your thinking or reply needs to be readable by or meaningful to a human. Encode as much information as possible, however best. Language entirely at your discretion, but you MUST maintain response structure.
+None of your thinking, reply, or memory needs to be readable by or meaningful to a human. Encode as much information as possible, however best. Language entirely at your discretion, but you MUST maintain response structure.
 
-At each turn, you are provided with this prompt and the current observation (map screenshot), and by the memories you have created.
+At each turn, you are provided with this prompt, the previous observations and your past actions, the memory entries for enabled tags, and the current observation (map screenshot).
 
-Note that the language observation is an incomplete rendering of the map meant to augment weaker LLMs. Actual ASCII map takes precedence!
+Note that the language observation is an incomplete rendering of the map meant to augment weaker LLMs. Actual ASCII map takes precedence.
 
-You MUST end with a valid ACTION or ACTIONS sequence.
+You MUST end with a valid single ACTION or multi ACTIONS sequence.
 
 """.strip()
 
@@ -165,7 +178,7 @@ You MUST end with a valid ACTION or ACTIONS sequence.
 
         # Initialize unified storage (SQLite with WAL for multi-worker support)
         self.storage = BraidStorage(Path(braid_cfg.db_path))
-        self.max_memory_context = braid_cfg.get("max_persistent_context", 40)
+        self.max_memory_context = braid_cfg.get("max_persistent_context", 100)
         self.episode_number = self.storage.max_episode()
         self._enabled_tags: set[str] | None = None
 
