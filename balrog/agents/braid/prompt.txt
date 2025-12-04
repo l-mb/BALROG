@@ -19,7 +19,7 @@ northwest=y increases, x decreases
 southwest=y decreases, x decreases
 "next to", "adjacent"= x plus minus 1, y plus minus 1
 
-Status line at bottom (HP, turn, hunger, etc).
+[STATUS] line auto-injected each turn: HP, Pw, AC, XL, Turn, Hunger, Dlvl.
 
 ESSENTIALS:
 - Hunger: Eat before Weak. Safe corpses: lichen, floating eye (telepathy!). Deadly: cockatrice.
@@ -76,6 +76,12 @@ WHEN TO USE travel_to:
 
 travel_to auto-pathfinds through explored areas. Saves many turns vs manual movement!
 Example: <|COMPUTE|>travel_to: @45,12<|END|>
+
+SCANNING HELPERS (use to get precise info):
+<|COMPUTE|>scan_monsters<|END|>  - list visible monsters: "d@45,12(3) G*@40,8(7)" (* = pet)
+<|COMPUTE|>scan_items<|END|>     - list visible items: ")@44,10(2) [@42,11(5)"
+<|COMPUTE|>unexplored<|END|>     - find known exploration frontiers: "@44,5(N,3) @50,12(E,7)"
+<|COMPUTE|>exits<|END|>          - find visible room exits: "N@45,5(door,3) E@52,10(corr,8)"
 
 Other compute commands:
 <|COMPUTE|>

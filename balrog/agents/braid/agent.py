@@ -166,7 +166,7 @@ class BRAIDAgent(BaseAgent):
         messages = self.prompt_builder.get_prompt()
 
         if messages:
-            messages[-1].content = self._build_enhanced_prompt(messages[-1].content)
+            messages[-1].content = self._build_enhanced_prompt(messages[-1].content, obs)
 
         # Increment step and start timing
         self._step += 1
@@ -196,9 +196,16 @@ class BRAIDAgent(BaseAgent):
 
         return parsed
 
-    def _build_enhanced_prompt(self, current_content: str) -> str:
+    def _build_enhanced_prompt(self, current_content: str, obs: dict[str, Any]) -> str:
         """Build prompt optimized for cache hits and minimal queries."""
         sections = []
+
+        # Auto-inject status from blstats
+        raw_obs = obs.get("obs", {})
+        blstats = raw_obs.get("blstats") if isinstance(raw_obs, dict) else None
+        if blstats is not None:
+            from .compute.navigation import format_status
+            sections.append(f"[STATUS] {format_status(blstats)}")
 
         p_entries = self.storage.retrieve(
             tags=self._enabled_tags, scope=MemoryScope.PERSISTENT, limit=self.max_memory_context
@@ -480,11 +487,17 @@ class BRAIDAgent(BaseAgent):
         if not self._pending_compute:
             return
 
-        from .compute.navigation import distance, get_position, nearest, pathfind
+        from .compute.navigation import (
+            distance,
+            get_position,
+            nearest,
+            pathfind,
+        )
 
         raw_obs = obs.get("obs", {})
         glyphs = raw_obs.get("glyphs") if isinstance(raw_obs, dict) else None
         blstats = raw_obs.get("blstats") if isinstance(raw_obs, dict) else None
+        tty_chars = raw_obs.get("tty_chars") if isinstance(raw_obs, dict) else None
 
         if glyphs is None or blstats is None:
             self._compute_result = "[COMPUTE] ERROR: No glyph data available"
@@ -545,6 +558,28 @@ class BRAIDAgent(BaseAgent):
                         results.append(f"travel_to: @{gx},{gy} = NO PATH (unexplored/blocked)")
                 else:
                     results.append("travel_to: PARSE ERROR")
+
+            elif request.strip() == "scan_monsters":
+                from .compute.navigation import scan_monsters
+                if tty_chars is not None:
+                    results.append(f"scan_monsters: {scan_monsters(glyphs, tty_chars, pos)}")
+                else:
+                    results.append("scan_monsters: ERROR (no tty_chars)")
+
+            elif request.strip() == "scan_items":
+                from .compute.navigation import scan_items
+                if tty_chars is not None:
+                    results.append(f"scan_items: {scan_items(glyphs, tty_chars, pos)}")
+                else:
+                    results.append("scan_items: ERROR (no tty_chars)")
+
+            elif request.strip() == "unexplored":
+                from .compute.navigation import find_unexplored
+                results.append(f"unexplored: {find_unexplored(glyphs, pos)}")
+
+            elif request.strip() == "exits":
+                from .compute.navigation import find_exits
+                results.append(f"exits: {find_exits(glyphs, pos)}")
 
             else:
                 results.append(f"UNKNOWN: {request}")
