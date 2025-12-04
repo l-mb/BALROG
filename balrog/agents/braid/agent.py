@@ -63,20 +63,19 @@ ESSENTIALS:
 - Descend when level explored. Retreat when HP low. Pets detect mimics.
 - Stairs up from lvl:1 = INSTANT LOSS (unless carrying true Amulet of Yendor)
 - Your pet(s) will only join you on a level change if right next to you
-- You might be standing on a dungeon feature that you then cannot see on the map!
-
-SECRETS: Walking into walls does NOT reveal secrets! ONLY the "search" command does.
-Use search at dead-ends and suspicious walls. Search 3-4x per spot (multi-action).
+- You, or something else, might be on top of a dungeon feature that you thus cannot see on the map!
 
 EXPLORATION PROTOCOL (follow this to avoid wandering):
 1. On entering new area: note position, mark unexplored exits in "frontier" tag
 2. Explore systematically: pick ONE frontier direction, go until dead-end or junction
-3. At dead-end: search 3-4x, then mark as "searched" and USE travel_to TO BACKTRACK
-4. At junction: mark new exits as frontier, continue to next unexplored
-5. NEVER revisit explored areas - check "blocked", "searched", "frontier" tags first
-6. Use travel_to for ANY movement >3 tiles to known coordinates
-7. When all explored: descend
-8. Map takes precedence over memories if they conflict. Update memories.
+3. At junction: mark new exits as frontier, continue to next unexplored
+4. For exploration, combine movement with "search" commands, efficient
+5. Search along walls or at deadend corridors
+6. At dead-end: search 3-4x, then mark as "searched" and USE travel_to TO BACKTRACK
+7. NEVER revisit explored areas - check "blocked", "searched", "frontier" tags first
+8. Use travel_to for ANY movement >3 tiles to known coordinates
+9. Map takes precedence over memories if they conflict. Update memories.
+A. When all explored: descend
 
 APPLY YOUR NETHACK KNOWLEDGE. Discover rules through play and store them as persistent memory.
 
@@ -561,6 +560,7 @@ You MUST end with exactly ONE of: <|ACTION|>...<|END|> OR <|ACTIONS|>...<|END|> 
             extended_thinking=getattr(response, "extended_thinking", None),
             action_type="multi" if len(actions) > 1 else "single",
             compute_requests=self._pending_compute if self._pending_compute else None,
+            raw_completion=completion,
         )
 
         # Store extended thinking for next turn if enabled
@@ -751,7 +751,8 @@ You MUST end with exactly ONE of: <|ACTION|>...<|END|> OR <|ACTIONS|>...<|END|> 
                     gx, gy = map(int, match.groups())
                     path = pathfind(glyphs, pos, (gx, gy))
                     if path:
-                        self._action_queue = path
+                        # Extend queue rather than overwrite (in case LLM also sent ACTIONS)
+                        self._action_queue.extend(path)
                         self._queue_start_hp = self._extract_hp(obs)
                         dirs = " ".join(path)
                         results.append(f"travel_to: @{gx},{gy} = QUEUED {len(path)} moves ({dirs})")
@@ -783,6 +784,10 @@ You MUST end with exactly ONE of: <|ACTION|>...<|END|> OR <|ACTIONS|>...<|END|> 
             actions = [a.strip() for a in multi_match.group(1).strip().split("\n") if a.strip()]
         elif (single_match := re.search(r"<\|ACTION\|>(.*?)<\|END\|>", completion, re.DOTALL)):
             actions = [single_match.group(1).strip()]
+        elif self._pending_compute:
+            # COMPUTE found but no ACTION - use "wait" as safe no-op
+            # COMPUTE will be processed next turn and queue actions
+            actions = ["wait"]
         else:
             actions = [self._fallback_action(completion)]
 
