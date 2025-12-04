@@ -12,6 +12,8 @@ agent:
     max_text_history: 4         # Override: BRAID uses memory instead of long history
     log_full_prompt: false      # Log full LLM prompts (large, for debugging)
     log_memory_details: false   # Log what was added/removed in memory updates
+    preserve_extended_thinking: false  # Inject previous extended thinking into prompt
+    max_extended_thinking_chars: 8000  # Truncation limit for preserved thinking
 
 eval:
   output_dir: "results"  # Directory where evaluation results will be saved

@@ -21,98 +21,18 @@ class BRAIDAgent(BaseAgent):
     """
 
     _SYSTEM_PROMPT_SUFFIX = """
-Your long-term goal beyond this single playthrough is to get better at playing NetHack.
+GOAL: Maximize dungeon depth, XP, milestones. Learn from each run via persistent memory.
 
-You are scored on achieving certain milestones in the game, character level, dungeon depth, eventual ascension. You should strive to achieve those goals in an optimal number of turns without dying.
+MAP: @=you >/<stairs .=floor #=corridor |/-=walls +=door {=fountain _=altar ^=trap
+North=up South=down East=right West=left. Status line at bottom (HP, turn, hunger, etc).
 
-ADDITIONAL INFORMATION BEFORE OBSERVATIONS:
+ESSENTIALS:
+- Hunger: Eat before Weak. Safe corpses: lichen, floating eye (telepathy!). Deadly: cockatrice.
+- Prayer: 800+ turn cooldown. Elbereth protects. Search 3x at dead-ends for secret doors.
+- Use "far " command prefix for efficient travel. Track stairs/altars/fountains in memory.
+- Descend when level explored. Retreat when HP low. Pets detect mimics.
 
-SOME MAP SYMBOLS:
-@=you >/<stairs .=floor #=corridor |/-=walls +=closed door '=open door
-{=fountain _=altar ^=trap Letters=monsters (lowercase weaker)
-0=boulder (push with direction) `=rock/statue $=gold )=weapon [=armor
-!=potion ?=scroll /=wand ==ring "=amulet (=tool *= gem/stone
-
-On the ASCII map: North is up. South is down. East is right. West is left.
-
-Character status (values, alignment, current XP and to next level, etc, Turn number) is provided at the bottom of the map.
-
-INCOMPLETE MONSTER THREATS BY LETTER:
-a=ant(giant) b=blob c=cockatrice(DEADLY touch!) d=dog/jackal e=eye(floating paralyze!)
-f=cat g=gremlin h=humanoid i=imp j=jelly k=kobold l=leprechaun(steals gold)
-m=mimic n=nymph(steals items!) o=orc p=piercer q=quadruped r=rodent s=spider
-t=trapper u=unicorn v=vortex w=worm x=xan/grid bug y=light z=zruty
-A=Angel B=Bat C=Centaur D=Dragon(VERY dangerous) E=Elemental F=Fungus/lichen
-G=Gnome H=Giant I=Invisible stalker J=Jabberwock K=Keystone Kop L=Lich(undead spellcaster)
-M=Mummy N=Naga O=Ogre P=Pudding Q=Quantum mechanic R=Rust monster(destroys armor!)
-S=Snake T=Troll(regenerates) U=Umber hulk V=Vampire W=Wraith X=Xorn Y=Yeti Z=Zombie
-@=human(shopkeeper,guard,priest,nurse) &=demon '=golem ;=sea monster :=lizard/newt
-
-SOME SAFE CORPSES: lichen, newt, jackal, kobold, orc, gnome, dwarf, floating eye(telepathy!), giants
-RISKY: tengu (can grant teleport control, poison resistance, but also teleportitis)
-DANGEROUS CORPSES: cockatrice(instant death), Medusa (stoning)
-NEVER EAT: anything you're unsure about. When in doubt, don't eat it. Could be rotten. Tinning helps.
-
-KEY STATUS EFFECTS:
-Hungry->Weak->Fainting->death. Eat before Weak. Conf=confused, Stun=stunned, Blind, Hallu=hallucinating
-Ill=sick(pray or cure), FoodPois=food poisoning(pray). Burdened/Stressed=carrying too much, Stoning=Eating lizard corpose, acidic monster, potion of acid, stone to flesh spell, successful prayer
-
-DUNGEON BRANCHES:
-Dungeons of Doom (main): levels 1-~26, goal is to descend
-Gnomish Mines: entrance ~lvl 2-4, has Minetown with shops, temples, perhaps better gear
-Rogue level: "You enter what seems to ben an older, more primitive world.", lvl 15-18. Slightly different, more archaic rules and symbols.
-Sokoban: entrance ~lvl 5-9, puzzle branch with guaranteed useful items at end, can't move diagonally, boulders need to be pushed into pits, solve carefully with a plan
-Oracle: ~lvl 5-9, can consult for sometimes useful tips (costs gold)
-Castle: ~lvl 25, has wand of wishing in chest
-Gehennom: below Castle, fire and demons, working toward Amulet, many special levels
-
-KEY STRATEGIES:
-- Elbereth: engrave in dust (E then write "Elbereth", possibly using a wand of fire etc). Most monsters won't attack you on it. Moving might harm it. Safe spot for stashes.
-- Altar sacrifice: kill monsters, offer corpses on aligned altar for favor and gifts (artifact weapons!), risky at non-aligned altars
-- Price ID: in shops, base prices can reveal item identity (e.g., 300zm scroll = identify)
-- Priests: Giving them gold (between 200 to 400 times player level) can grant intrinsic protection
-- Wand testing: engrave letter with wand, message can reveal wand type
-- When in an apparent deadend, search a few times before marking as such (you can queue up a multi-action)
-- Search might also reveal secret doors in walls
-- Certain rings and character abilities and eating (tinned) corpses can convey auto-search
-- Stealth is very important to acquire
-- Fountain: quaff for random effects, dip for Excalibur if lawful with long sword
-- Stash: leave items on early levels to retrieve later
-- Pet: keep fed (throw food), can steal from shops, detects mimics/traps
-- Remember mimics exist
-- Monsters could be invisible
-- Tinning has beneficial effects
-- Magic markers should be blessed, have or create blessed scrolls of charging
-- Explore and move efficiently, do not waste movements, choose a consistent pathing pattern
-- The "far" actions allow you to move in a certain direction as far as possible, until an obstacle appears, and are very efficient for exploration (preferable to multi actions, even)
-- Remember which areas you have searched, or tried to explore, so you do not need to repeat
-- You can often move boulders, unless they're up against a dead end (wall, another boulder, or monster)
-- You can only unlock, open, or kick doors when you are right next to them, and the next prompt from the game will then be which direction, so make a note for the next turn to answer this fast
-- Remember your existing NetHack knowledge
-
-EARLY GAME PRIORITIES:
-1. Find and equip any armor/weapons
-2. Identify food sources, stockpile rations
-3. Find altar for sacrifice and alignment
-4. Don't over-explore - descend when level explored
-5. Keep track of stairs up for retreat
-6. Improve player level, but don't outgrow your equipment / DPS, as monsters grow with your level
-7. Make a plan (via memories), aware of LLM limitations in this BALROG NetHack Learning Environment, so you can make consistent progress
-
-COMMON MISTAKES TO AVOID:
-- Fighting when low HP instead of retreating
-- Eating unknown corpses (especially cockatrice!)
-- Most rings increase hunger (except slow digestion, very desirable!)
-- Invoking spells increases hunger
-- Praying too often (gods get angry, wait 800+ turns)
-- Attacking shopkeeper/temple priest (very dangerous)
-- Ignoring hunger until Fainting
-- Fighting multiple too strong enemies in open spaces
-- Forgetting where stairs up are located
-- Using unidentified wands pointed at self
-- Stepping on traps repeatedly (use search to find them)
-- You can only move far in a direction if at least the first step is possible
-- You CANNOT move into walls, doors, or the surrounding walls. This is NOT an effective exploration strategy. Use search instead, and mark the results in your memory.
+APPLY YOUR NETHACK KNOWLEDGE. Discover rules through play and store them as persistent memory.
 
 RESPONSE FORMAT (all parts in single response):
 1. Optional thinking if situation requires it according to your judgment: <think>terse analysis</think>
@@ -138,28 +58,88 @@ MULTI-ACTION GUIDELINES:
 - Queue aborts automatically on: combat, prompts requiring response, HP drop, traps
 - You can queue as many multi-actions as needed
 
-MEMORY:
-- The memory tool is your best chance for making progress and avoiding getting stuck. Use extensively, and very detailed.
-- scope: episode (cleared each play-through) | persistent (survives)
-- T: indicates the step/turn at which this observation was recorded. (Compare to T: on map)
-- prio: 1-9, higher shown first when limit reached (default 5)
-- enable/disable_tags: filter what's included in prompt; reset_tags: true to include all
-- update/replace: indirectly, map to remove + add
-- You're also provided with a list of existing tags and how many entries have them
+MEMORY SYSTEM:
+- scope: episode (this run only) | persistent (survives across runs)
+- prio: 1-9, higher shown first (default 5). Max 256 chars per entry.
+- enable/disable_tags to filter. Use "lvl:N" tags for level-specific data.
+- Episode: exploration, plans, stashes. Persistent: game rules, strategies learned.
+- Abbreviate freely - human readability not required. Remove stale entries.
 
-HINTS FOR MEMORY USE:
-- content/tags exclusive for agent only - abbreviate freely, disregard human readability, encode as much information as possible, regardless of language used
-- Use tags for specific levels, areas, monsters, puzzles, short- and long-term planning, risk tracking, specific to character role, ...
-- Use episode memory for tracking exploration, stashes, plans, etc: anything that is only for this particular playthrough attempt
-- In particular detail: track areas, corridors, rooms, levels you have already explored, directions you have already tried to move in but made no progress, and directions/areas you plan on exploring in the future, to avoid getting stuck in loops
-- Use it to annotate the explored map, corridors, rooms, levels
-- Create enough memories to improve your progress in future turns with minimal repetition
-- Use memory as a todo list and planner
-- Use persistent memory to learn permanently and across runs, properties of monsters items etc, both tactically and strategically or meta attributes such as establishing a coherent tagging strategy for memory, supplementing and overriding system prompt hints for play
-- When you discover limitations, constraints, or invalid moves, create memories so you can take this into account in the future. When those are fundamental rules of the game, store as persistent memory.
-- A single entry can have upto 256 characters. Split if needed.
-- You can have hundreds of entries with proper filtering, showing up to a 100 for persistent and episode memories each
-- Remove entries that truly no longer apply
+SPATIAL MEMORY SCHEMA:
+
+POSITION (tag: "pos", prio: 9) - UPDATE EVERY TURN:
+  Format: "@{x},{y} L{level}" - your current location
+  Remove old pos entry before adding new one.
+
+BLOCKED MOVES (tag: "blocked,lvl:{N}", prio: 8):
+  Format: "@{x},{y}:{dir}" - a direction that failed from this position
+  CRITICAL: CHECK this tag BEFORE moving. Do NOT retry blocked directions!
+
+SEARCHED SPOTS (tag: "searched,lvl:{N}", prio: 6):
+  Format: "@{x},{y} n:{count}" - how many times searched at this spot
+  After 3 searches with no result, stop searching there.
+  If search reveals door/corridor, remove entry and update map.
+
+FRONTIER (tag: "frontier,lvl:{N}", prio: 6):
+  Format: "@{x},{y}:{dir}" - unexplored direction to try later
+  Remove when explored or blocked.
+
+STAIRS (tag: "stairs,lvl:{N}", prio: 7):
+  Format: ">{x},{y}->L{dest}" or "<{x},{y}->L{dest}" - stair locations
+  Essential for retreat and navigation between levels.
+
+ALTAR (tag: "altar,lvl:{N}", prio: 7):
+  Format: "@{x},{y} {alignment}" - altar location and alignment (lawful/neutral/chaotic)
+  Critical for sacrifice strategy and detecting your alignment.
+
+FOUNTAIN (tag: "fountain,lvl:{N}", prio: 6):
+  Format: "@{x},{y}" - fountain location
+  Useful for Excalibur (lawful+longsword), or random effects.
+
+SHOP (tag: "shop,lvl:{N}", prio: 7):
+  Format: "@{x},{y} {type}" - shop location and type (general, armor, weapon, etc.)
+
+TEMPLE (tag: "temple,lvl:{N}", prio: 7):
+  Format: "@{x},{y} {alignment}" - temple with priest
+
+ROOMS/AREAS (tag: "map,lvl:{N}"):
+  Format: "R{id}@{x},{y} exits:{dirs} searched:{y/n}"
+  Track room connectivity and search status.
+
+ACTION LOG (tag: "actlog", prio: 7):
+  Format: "T{turn}:{action} @{from}->@{to} {result}"
+  Examples:
+    "T15:north @5,3->@5,3 blocked" (same pos = failed)
+    "T16:east @5,3->@8,3 ok" (moved 3 tiles)
+    "T17:search @8,3->@8,3 found_door_N"
+    "T18:farnorth @8,3->@8,1 ok"
+  If from==to after move command, it was blocked - add to "blocked" tag!
+  Keep last 5-10 entries. Remove stale ones.
+
+ACTION-OUTCOME PROTOCOL:
+After EVERY action:
+1. Check game message - what happened?
+2. Log outcome: add actlog entry
+3. If blocked: add to "blocked" tag with position+direction
+4. Update "pos" tag
+
+Before EVERY move:
+1. Check "blocked" tag for current position + intended direction
+2. Check "frontier" for unexplored options
+3. Do NOT repeat recently failed moves - this wastes turns!
+
+GAME RULES (tag: "rule", scope: PERSISTENT, prio: 8):
+  When you discover a game mechanic, constraint, or rule, store it PERMANENTLY.
+  These survive across episodes and help future runs.
+  Format: "{category}: {description}"
+  Examples:
+    "invocation: bell/book/candles must be used in exact order at vibrating square"
+    "rings: ring of conflict makes all monsters fight each other, including pets"
+    "polymorph: wielded cockatrice corpse doesn't stone you while polymorphed"
+
+  After failed or unexpected actions, ask yourself:
+  "Is this a GENERAL game rule I should remember forever, or just a local situation?"
+  If general -> add as persistent with tag "rule"
 
 None of your thinking, reply, or memory needs to be readable by or meaningful to a human. Encode as much information as possible, however best. Language entirely at your discretion, but you MUST maintain response structure.
 
@@ -212,6 +192,11 @@ You MUST end with a valid single ACTION or multi ACTIONS sequence.
         # Multi-action queue state
         self._action_queue: list[str] = []
         self._queue_start_hp: int | None = None
+
+        # Extended thinking preservation
+        self._preserve_extended_thinking = braid_cfg.get("preserve_extended_thinking", False)
+        self._max_extended_thinking_chars = braid_cfg.get("max_extended_thinking_chars", 8000)
+        self._last_extended_thinking: str | None = None
 
     def build_system_prompt(self, env_instruction: str) -> str:
         """Append BRAID response format instructions to environment prompt."""
@@ -345,6 +330,10 @@ You MUST end with a valid single ACTION or multi ACTIONS sequence.
         if tag_info:
             sections.append(tag_info)
 
+        # Inject previous extended thinking if preserved
+        if self._preserve_extended_thinking and self._last_extended_thinking:
+            sections.append(f"PREVIOUS REASONING (from last turn):\n{self._last_extended_thinking}")
+
         sections.append(current_content)
 
         return "\n\n".join(sections)
@@ -430,6 +419,16 @@ You MUST end with a valid single ACTION or multi ACTIONS sequence.
             extended_thinking=getattr(response, "extended_thinking", None),
             action_type="multi" if len(actions) > 1 else "single",
         )
+
+        # Store extended thinking for next turn if enabled
+        if self._preserve_extended_thinking:
+            ext = getattr(response, "extended_thinking", None)
+            if ext:
+                if len(ext) > self._max_extended_thinking_chars:
+                    ext = ext[: self._max_extended_thinking_chars] + "\n[...truncated]"
+                self._last_extended_thinking = ext
+            else:
+                self._last_extended_thinking = None
 
         # Log memory updates
         self.storage.log_memory_update(
@@ -689,4 +688,5 @@ You MUST end with a valid single ACTION or multi ACTIONS sequence.
         self._episode_output_tokens = 0
         self._action_queue.clear()
         self._queue_start_hp = None
+        self._last_extended_thinking = None
         self.storage.log_reset(self.episode_number)
