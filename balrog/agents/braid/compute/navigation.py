@@ -291,6 +291,261 @@ DOOR_CMAP = {12, 13, 14, 15, 16}  # All door types
 CORRIDOR_CMAP = {21, 22}
 
 
+# Floor cmap indices for room detection
+FLOOR_CMAP = {19, 20}  # S_room, S_darkroom
+
+
+def detect_room(
+    glyphs: np.ndarray, pos: tuple[int, int]
+) -> set[tuple[int, int]] | None:
+    """Flood-fill to detect room from current position.
+
+    Args:
+        glyphs: 2D glyph array from observation
+        pos: Current (x, y) position
+
+    Returns:
+        Set of (x, y) floor tile coordinates, or None if not in a room
+    """
+    px, py = pos
+    rows, cols = glyphs.shape
+
+    # Check if current position is a floor tile
+    if not (0 <= py < rows and 0 <= px < cols):
+        return None
+    cmap_idx = int(glyphs[py, px]) - CMAP_OFF
+    if cmap_idx not in FLOOR_CMAP:
+        return None
+
+    # Flood fill from current position
+    room_tiles: set[tuple[int, int]] = set()
+    queue = [(px, py)]
+
+    while queue:
+        x, y = queue.pop()
+        if (x, y) in room_tiles:
+            continue
+        if not (0 <= y < rows and 0 <= x < cols):
+            continue
+        cmap = int(glyphs[y, x]) - CMAP_OFF
+        if cmap not in FLOOR_CMAP:
+            continue
+
+        room_tiles.add((x, y))
+        # Add cardinal neighbors
+        for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+            queue.append((x + dx, y + dy))
+
+    # Check if it's actually a room (not corridor)
+    if len(room_tiles) < 6:
+        return None  # Too small
+
+    xs = [t[0] for t in room_tiles]
+    ys = [t[1] for t in room_tiles]
+    width = max(xs) - min(xs) + 1
+    height = max(ys) - min(ys) + 1
+
+    if width < 3 or height < 3:
+        return None  # Too narrow, probably corridor
+
+    return room_tiles
+
+
+def detect_corridor(
+    glyphs: np.ndarray, pos: tuple[int, int]
+) -> list[tuple[int, int]] | None:
+    """Detect corridor tiles from current position.
+
+    Args:
+        glyphs: 2D glyph array from observation
+        pos: Current (x, y) position
+
+    Returns:
+        Ordered list of corridor tiles, or None if not in a corridor
+    """
+    px, py = pos
+    rows, cols = glyphs.shape
+
+    # Check if current position is a corridor tile
+    if not (0 <= py < rows and 0 <= px < cols):
+        return None
+    cmap_idx = int(glyphs[py, px]) - CMAP_OFF
+    if cmap_idx not in CORRIDOR_CMAP:
+        return None
+
+    # Flood fill on corridor tiles
+    corridor_tiles: set[tuple[int, int]] = set()
+    queue = [(px, py)]
+
+    while queue:
+        x, y = queue.pop()
+        if (x, y) in corridor_tiles:
+            continue
+        if not (0 <= y < rows and 0 <= x < cols):
+            continue
+        cmap = int(glyphs[y, x]) - CMAP_OFF
+        if cmap not in CORRIDOR_CMAP:
+            continue
+
+        corridor_tiles.add((x, y))
+        # Add all 8 neighbors for corridors
+        for dy, dx in DIRS.values():
+            queue.append((x + dx, y + dy))
+
+    if len(corridor_tiles) < 2:
+        return None
+
+    # Order tiles by walking from one end to the other
+    # Find endpoints (tiles with only 1 corridor neighbor)
+    def count_neighbors(tile: tuple[int, int]) -> int:
+        x, y = tile
+        return sum(1 for dy, dx in DIRS.values() if (x + dx, y + dy) in corridor_tiles)
+
+    endpoints = [t for t in corridor_tiles if count_neighbors(t) == 1]
+
+    # If no clear endpoints, just return tiles sorted by position
+    if not endpoints:
+        return sorted(corridor_tiles)
+
+    # Walk from first endpoint
+    ordered = []
+    visited: set[tuple[int, int]] = set()
+    current: tuple[int, int] | None = endpoints[0]
+
+    while current is not None and current not in visited:
+        visited.add(current)
+        ordered.append(current)
+        # Find unvisited neighbor
+        x, y = current
+        next_tile = None
+        for dy, dx in DIRS.values():
+            neighbor = (x + dx, y + dy)
+            if neighbor in corridor_tiles and neighbor not in visited:
+                next_tile = neighbor
+                break
+        current = next_tile
+
+    return ordered
+
+
+def _find_perimeter(
+    room_tiles: set[tuple[int, int]],
+) -> list[tuple[int, int]]:
+    """Find perimeter tiles (room tiles adjacent to non-room)."""
+    perimeter = []
+    for x, y in room_tiles:
+        for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0), (1, 1), (1, -1), (-1, 1), (-1, -1)]:
+            if (x + dx, y + dy) not in room_tiles:
+                perimeter.append((x, y))
+                break
+    return perimeter
+
+
+def _order_perimeter(
+    perimeter: list[tuple[int, int]], start: tuple[int, int]
+) -> list[tuple[int, int]]:
+    """Order perimeter tiles for efficient walk using nearest-neighbor heuristic."""
+    if not perimeter:
+        return []
+
+    # Start from nearest to current position
+    remaining = set(perimeter)
+    ordered = []
+    current = min(remaining, key=lambda p: distance(start[0], start[1], p[0], p[1]))
+
+    while remaining:
+        ordered.append(current)
+        remaining.discard(current)
+        if remaining:
+            current = min(remaining, key=lambda p: distance(current[0], current[1], p[0], p[1]))
+
+    return ordered
+
+
+def plan_room_exploration(
+    glyphs: np.ndarray, room_tiles: set[tuple[int, int]], pos: tuple[int, int]
+) -> list[str]:
+    """Plan efficient perimeter walk with searches.
+
+    Args:
+        glyphs: 2D glyph array from observation
+        room_tiles: Set of room floor tiles
+        pos: Current (x, y) position
+
+    Returns:
+        List of actions (directions + "search")
+    """
+    # Find and order perimeter
+    perimeter = _find_perimeter(room_tiles)
+    if not perimeter:
+        return []
+
+    ordered = _order_perimeter(perimeter, pos)
+
+    # Generate actions
+    actions = []
+    current = pos
+
+    for target in ordered:
+        # Path to target
+        path = pathfind(glyphs, current, target)
+        if path:
+            actions.extend(path)
+            current = target
+        # Search at wall
+        actions.append("search")
+
+    return actions
+
+
+def plan_corridor_exploration(
+    glyphs: np.ndarray, corridor: list[tuple[int, int]], pos: tuple[int, int]
+) -> list[str]:
+    """Plan corridor exploration with searches at ends.
+
+    Args:
+        glyphs: 2D glyph array from observation
+        corridor: Ordered list of corridor tiles
+        pos: Current (x, y) position
+
+    Returns:
+        List of actions (directions + "search")
+    """
+    if not corridor:
+        return []
+
+    actions = []
+
+    # Find endpoints
+    start_end = corridor[0]
+    far_end = corridor[-1]
+
+    # Determine which end to explore first (nearest)
+    d_start = distance(pos[0], pos[1], start_end[0], start_end[1])
+    d_far = distance(pos[0], pos[1], far_end[0], far_end[1])
+
+    if d_start <= d_far:
+        first, second = start_end, far_end
+    else:
+        first, second = far_end, start_end
+
+    # Go to first end
+    path = pathfind(glyphs, pos, first)
+    if path:
+        actions.extend(path)
+    # Search at dead-end (3x)
+    actions.extend(["search", "search", "search", "search"])
+
+    # Go to second end
+    path = pathfind(glyphs, first, second)
+    if path:
+        actions.extend(path)
+    # Search at dead-end (3x)
+    actions.extend(["search", "search", "search"])
+
+    return actions
+
+
 def find_exits(glyphs: np.ndarray, pos: tuple[int, int]) -> str:
     """Find exits from current room/area - doors and corridor openings.
 

@@ -9,14 +9,14 @@ Letter and a few other symbols: monster
 Number: Invisible monster via warning
 
 Directions relative to map coordinates:
-north=y increases, x unchanged
-south=y decreases, x unchanged
+north=y decreases, x unchanged
+south=y increases, x unchanged
 west=x decreases, y unchanged
 east=x increases, y unchanged
-northeast=y increases, x increases
-southeast=y decreases, x increases
-northwest=y increases, x decreases
-southwest=y decreases, x decreases
+northeast=y decreases, x increases
+southeast=y increases, x increases
+northwest=y decreases, x decreases
+southwest=y increases, x decreases
 "next to", "adjacent"= x plus minus 1, y plus minus 1
 
 [STATUS] line auto-injected each turn: HP, Pw, AC, XL, Turn, Hunger, Dlvl.
@@ -82,6 +82,26 @@ SCANNING HELPERS (use to get precise info):
 <|COMPUTE|>scan_items<|END|>     - list visible items: ")@44,10(2) [@42,11(5)"
 <|COMPUTE|>unexplored<|END|>     - find known exploration frontiers: "@44,5(N,3) @50,12(E,7)"
 <|COMPUTE|>exits<|END|>          - find visible room exits: "N@45,5(door,3) E@52,10(corr,8)"
+
+EXPLORATION HELPERS (autonomous exploration - saves many LLM calls!):
+<|COMPUTE|>explore_room<|END|>           - walk room perimeter, search walls. QUEUED N actions
+<|COMPUTE|>explore_room:cautious<|END|>  - same, but abort on ANY discovery (door/passage found)
+<|COMPUTE|>explore_corridor<|END|>       - walk corridor ends, search 3x at each. QUEUED N actions
+<|COMPUTE|>explore_corridor:cautious<|END|>
+
+USE explore_* when:
+- Entering a new room: use explore_room to systematically search walls for secrets
+- In a corridor: use explore_corridor to search dead-ends
+- Default mode (thorough) only aborts on combat/HP drop
+- Cautious mode aborts if any new tile is revealed (found secret door/passage)
+- PREFER to single step exploration
+- LEARN how to use them
+
+Example workflow:
+1. Enter room -> <|COMPUTE|>explore_room<|END|>
+2. Queue runs autonomously (20+ actions)
+3. Aborts if monster attacks or HP drops
+4. After completion, use exits/unexplored to find next area
 
 Other compute commands:
 <|COMPUTE|>

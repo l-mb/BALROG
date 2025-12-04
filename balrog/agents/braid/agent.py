@@ -78,6 +78,8 @@ class BRAIDAgent(BaseAgent):
         # Multi-action queue state
         self._action_queue: list[str] = []
         self._queue_start_hp: int | None = None
+        self._cautious_mode: bool = False
+        self._last_glyphs: Any = None  # For cautious mode discovery detection
 
         # Extended thinking preservation
         # Opus 4.5+ has native thinking block preservation, so skip manual injection
@@ -140,6 +142,8 @@ class BRAIDAgent(BaseAgent):
                 )
                 self._action_queue.clear()
                 self._queue_start_hp = None
+                self._cautious_mode = False
+                self._last_glyphs = None
             else:
                 self._step += 1
                 action_response = self._pop_queued_action()
@@ -461,6 +465,27 @@ class BRAIDAgent(BaseAgent):
         if any(p in text.lower() for p in danger_patterns):
             return True
 
+        # Cautious mode: abort on any map discovery (new glyphs appearing)
+        if self._cautious_mode and self._last_glyphs is not None:
+            raw_obs = obs.get("obs", {})
+            glyphs = raw_obs.get("glyphs") if isinstance(raw_obs, dict) else None
+            if glyphs is not None:
+                import numpy as np
+                from nle import nethack
+                # Check if any new non-stone tiles appeared (discovery)
+                stone_glyph = nethack.GLYPH_CMAP_OFF + 0
+                was_stone = self._last_glyphs == stone_glyph
+                now_not_stone = glyphs != stone_glyph
+                newly_revealed = was_stone & now_not_stone
+                if np.any(newly_revealed):
+                    self.storage.log_error(
+                        self.episode_number, self._step,
+                        f"Cautious abort: {np.sum(newly_revealed)} tiles revealed"
+                    )
+                    return True
+                # Update snapshot
+                self._last_glyphs = glyphs.copy()
+
         return False
 
     def _extract_hp(self, obs: dict[str, Any]) -> int | None:
@@ -580,6 +605,44 @@ class BRAIDAgent(BaseAgent):
             elif request.strip() == "exits":
                 from .compute.navigation import find_exits
                 results.append(f"exits: {find_exits(glyphs, pos)}")
+
+            elif request.strip() in ("explore_room", "explore_room:cautious"):
+                from .compute.navigation import detect_room, plan_room_exploration
+                cautious = request.strip().endswith(":cautious")
+                room = detect_room(glyphs, pos)
+                if room:
+                    actions = plan_room_exploration(glyphs, room, pos)
+                    if actions:
+                        self._action_queue.extend(actions)
+                        self._queue_start_hp = self._extract_hp(obs)
+                        self._cautious_mode = cautious
+                        if cautious:
+                            self._last_glyphs = glyphs.copy()
+                        mode_str = " (cautious)" if cautious else ""
+                        results.append(f"explore_room{mode_str}: QUEUED {len(actions)} actions")
+                    else:
+                        results.append("explore_room: NO ACTIONS (already at perimeter?)")
+                else:
+                    results.append("explore_room: NOT IN ROOM (try explore_corridor)")
+
+            elif request.strip() in ("explore_corridor", "explore_corridor:cautious"):
+                from .compute.navigation import detect_corridor, plan_corridor_exploration
+                cautious = request.strip().endswith(":cautious")
+                corridor = detect_corridor(glyphs, pos)
+                if corridor:
+                    actions = plan_corridor_exploration(glyphs, corridor, pos)
+                    if actions:
+                        self._action_queue.extend(actions)
+                        self._queue_start_hp = self._extract_hp(obs)
+                        self._cautious_mode = cautious
+                        if cautious:
+                            self._last_glyphs = glyphs.copy()
+                        mode_str = " (cautious)" if cautious else ""
+                        results.append(f"explore_corridor{mode_str}: QUEUED {len(actions)} actions")
+                    else:
+                        results.append("explore_corridor: NO ACTIONS")
+                else:
+                    results.append("explore_corridor: NOT IN CORRIDOR (try explore_room)")
 
             else:
                 results.append(f"UNKNOWN: {request}")
@@ -754,6 +817,8 @@ class BRAIDAgent(BaseAgent):
         self._episode_output_tokens = 0
         self._action_queue.clear()
         self._queue_start_hp = None
+        self._cautious_mode = False
+        self._last_glyphs = None
         self._last_extended_thinking = None
         self._recent_actions.clear()
         self.storage.log_reset(self.episode_number)
