@@ -44,6 +44,7 @@ EXPLORATION PROTOCOL (follow this to avoid wandering):
 5. NEVER revisit explored areas - check "blocked", "searched", "frontier" tags first
 6. Use "far " prefix for efficient travel through explored corridors
 7. When all frontiers exhausted: level explored, find stairs down
+8. In rare circumstances, dungeon features CAN disappear or change. Or you might have misclassified in the past. Surrounding map takes precedence over memories. Update memories.
 
 APPLY YOUR NETHACK KNOWLEDGE. Discover rules through play and store them as persistent memory.
 
