@@ -36,6 +36,7 @@ ESSENTIALS:
 - Prayer: 800+ turn cooldown. Elbereth protects.
 - Descend when level explored. Retreat when HP low. Pets detect mimics.
 - Stairs up from lvl:1 = INSTANT LOSS (unless carrying true Amulet of Yendor)
+- Your pet(s) will only join you on a level change if they're standing right next to you
 - You might be standing on a dungeon feature that you then cannot see on the map!
 
 SECRETS: Walking into walls does NOT reveal secrets! ONLY the "search" command does.
@@ -164,14 +165,16 @@ DOORS (tag: "map,door,lvl:{N}"):
   Format: "D{id}@{x},{y},{dir} locked:{y/n} open:{y/n}"
   Track doors and status. Doors restrict movement pattern. Remove if door destroyed.
 
-ACTION LOG (tag: "actlog", prio: 7):
+ACTION LOG (tag: "actlog", prio: 8):
   Format: "T{turn}:{action} @{from}->@{to} {result}"
   Examples:
     "T15:north @5,3->@5,3 blocked" (same pos = failed)
     "T16:east @5,3->@8,3 ok" (moved 3 tiles)
     "T17:search @8,3->@8,3 found_door_N"
     "T18:farnorth @8,3->@8,1 ok"
+    "T19:open @8,3->North pending"
   If from==to after move command, it was blocked - add to "blocked" tag!
+  "pending" actions can be used to track those that require a direction (open, kick, fight) as a second step so you do not have to think about intent. Mark as "ok" later.
   Keep last 5-10 entries. Remove stale ones.
 
 ACTION-OUTCOME PROTOCOL:
