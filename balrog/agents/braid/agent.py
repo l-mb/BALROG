@@ -23,14 +23,27 @@ class BRAIDAgent(BaseAgent):
     _SYSTEM_PROMPT_SUFFIX = """
 GOAL: Maximize dungeon depth, XP, milestones. Learn from each run via persistent memory.
 
-MAP: @=you >/<stairs .=floor #=corridor |/-=walls +=door {=fountain _=altar ^=trap
+MAP: @=you >/<stairs down/up .=floor #=corridor |/-=walls +=door {=fountain _=altar ^=trap
 North=up South=down East=right West=left. Status line at bottom (HP, turn, hunger, etc).
 
 ESSENTIALS:
 - Hunger: Eat before Weak. Safe corpses: lichen, floating eye (telepathy!). Deadly: cockatrice.
-- Prayer: 800+ turn cooldown. Elbereth protects. Search 3x at dead-ends for secret doors.
-- Use "far " command prefix for efficient travel. Track stairs/altars/fountains in memory.
+- Prayer: 800+ turn cooldown. Elbereth protects.
 - Descend when level explored. Retreat when HP low. Pets detect mimics.
+- Stairs up from lvl:1 = INSTANT LOSS (unless carrying true Amulet of Yendor)
+- You might be standing on a dungeon feature that you then cannot see on the map!
+
+SECRETS: Walking into walls does NOT reveal secrets! ONLY the "search" command does.
+Use search at dead-ends and suspicious walls. Search 3-4x per spot (multi-action).
+
+EXPLORATION PROTOCOL (follow this to avoid wandering):
+1. On entering new area: note position, mark unexplored exits in "frontier" tag
+2. Explore systematically: pick ONE frontier direction, go until dead-end or junction
+3. At dead-end: search 3-4x, then mark as "searched" and backtrack to last junction
+4. At junction: mark new exits as frontier, continue to next unexplored
+5. NEVER revisit explored areas - check "blocked", "searched", "frontier" tags first
+6. Use "far " prefix for efficient travel through explored corridors
+7. When all frontiers exhausted: level explored, find stairs down
 
 APPLY YOUR NETHACK KNOWLEDGE. Discover rules through play and store them as persistent memory.
 
@@ -51,12 +64,33 @@ enable_tags: ["tag"] | disable_tags: ["tag"] | reset_tags: true
            <|END|>
 
 MULTI-ACTION GUIDELINES:
-- Allows for more efficient and cost-effective playthroughs. Prioritize use!
-- Use for: navigation sequences, repeated search, search + navigation combos, safe paths
-- You can issue multiple move commands even in unknown paths. If it's a deadend, you'll simply stop.
-- Avoid for: combat, unknown areas, low HP
-- Queue aborts automatically on: combat, prompts requiring response, HP drop, traps
-- You can queue as many multi-actions as needed
+- Efficient and cost-effective. Prioritize use! Queue aborts on combat/prompts/HP drop/traps.
+- Avoid for: combat, low HP.
+
+Example - repeated search at dead-end:
+<|ACTIONS|>
+search
+search
+search
+search
+<|END|>
+
+Example - move along corridor with search:
+<|ACTIONS|>
+north
+search
+north
+search
+north
+<|END|>
+
+Example - travel known safe path:
+<|ACTIONS|>
+far north
+east
+east
+far south
+<|END|>
 
 MEMORY SYSTEM:
 - scope: episode (this run only) | persistent (survives across runs)
@@ -85,12 +119,16 @@ FRONTIER (tag: "frontier,lvl:{N}", prio: 6):
   Remove when explored or blocked.
 
 STAIRS (tag: "stairs,lvl:{N}", prio: 7):
-  Format: ">{x},{y}->L{dest}" or "<{x},{y}->L{dest}" - stair locations
+  Format: ">{x},{y}->L{dest}" (down) or "<{x},{y}->L{dest}" (up) - stair locations
   Essential for retreat and navigation between levels.
 
 ALTAR (tag: "altar,lvl:{N}", prio: 7):
   Format: "@{x},{y} {alignment}" - altar location and alignment (lawful/neutral/chaotic)
   Critical for sacrifice strategy and detecting your alignment.
+
+SINK (tag: "sink,lvl:{N}", prio: 7):
+  Format: "@{x},{y}" - sink
+  Useful for kicking, pudding farming, dropping items into it with special effects
 
 FOUNTAIN (tag: "fountain,lvl:{N}", prio: 6):
   Format: "@{x},{y}" - fountain location
@@ -102,9 +140,13 @@ SHOP (tag: "shop,lvl:{N}", prio: 7):
 TEMPLE (tag: "temple,lvl:{N}", prio: 7):
   Format: "@{x},{y} {alignment}" - temple with priest
 
-ROOMS/AREAS (tag: "map,lvl:{N}"):
+ROOMS/AREAS (tag: "map,room,lvl:{N}"):
   Format: "R{id}@{x},{y} exits:{dirs} searched:{y/n}"
   Track room connectivity and search status.
+
+DOORS (tag: "map,door,lvl:{N}"):
+  Format: "D{id}@{x},{y},{dir} locked:{y/n} open:{y/n}"
+  Track doors and status. Doors restrict movement pattern. Remove if door destroyed.
 
 ACTION LOG (tag: "actlog", prio: 7):
   Format: "T{turn}:{action} @{from}->@{to} {result}"
@@ -145,7 +187,7 @@ None of your thinking, reply, or memory needs to be readable by or meaningful to
 
 At each turn, you are provided with this prompt, the previous observations and your past actions, the memory entries for enabled tags, and the current observation (map screenshot).
 
-Note that the language observation is an incomplete rendering of the map meant to augment weaker LLMs. Actual ASCII map takes precedence.
+Important: that the language observation is an incomplete rendering of the map meant to augment weaker LLMs, and may appear to contradict the map. Actual ASCII map takes precedence.
 
 You MUST end with a valid single ACTION or multi ACTIONS sequence.
 
