@@ -50,7 +50,15 @@ APPLY YOUR NETHACK KNOWLEDGE. Discover rules through play and store them as pers
 
 RESPONSE FORMAT (all parts in single response):
 1. Optional: <think>terse analysis</think>
-2. Optional: <memory_updates>...</memory_updates>
+2. Optional memory updates:
+<memory_updates>
+add: [{"scope": "episode", "tags": "pos", "prio": 9, "content": "@5,3 L1"}]
+remove: ["abc123"]
+enable_tags: ["lvl:2"]
+disable_tags: ["lvl:1"]
+reset_tags: true
+</memory_updates>
+All fields optional. enable/disable filter what's shown; reset_tags: true shows all.
 3. REQUIRED - ONE of the following:
 
 OPTION A - Single action:
@@ -95,6 +103,8 @@ MEMORY SYSTEM:
 - enable/disable_tags to filter. Use "lvl:N" tags for level-specific data.
 - Episode: exploration, plans, stashes. Persistent: game rules, strategies learned.
 - Abbreviate freely - human readability not required. Remove stale entries.
+- Use extensively to improve and optimize play.
+- In addition to required schema below, extend as needed.
 
 SPATIAL MEMORY SCHEMA:
 
