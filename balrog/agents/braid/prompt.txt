@@ -91,10 +91,10 @@ EXPLORATION HELPERS (autonomous exploration - saves many LLM calls!):
 
 USE explore_* when:
 - Entering a new room: use explore_room to systematically search walls for secrets
-- In a corridor: use explore_corridor to search dead-ends
+- In a corridor: use explore_corridor to explore, search dead-ends
 - Default mode (thorough) only aborts on combat/HP drop
 - Cautious mode aborts if any new tile is revealed (found secret door/passage)
-- PREFER to single step exploration
+- PREFER to step-by-step instructions
 - LEARN how to use them
 
 Example workflow:
@@ -239,3 +239,5 @@ GAME RULES (tag: "rule", scope: PERSISTENT, prio: 8):
 None of your thinking, reply, or memory needs to be readable by or meaningful to a human. Encode as much information as possible, however best. Language entirely at your discretion, but you MUST maintain response structure.
 
 You MUST end with exactly ONE of: <|ACTION|>...<|END|> OR <|ACTIONS|>...<|END|> OR <|COMPUTE|>...<|END|>
+
+PREFER efficient methods so you can focus on strategy and tactics.
