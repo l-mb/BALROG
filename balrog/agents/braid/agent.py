@@ -39,6 +39,8 @@ GOAL: Maximize dungeon depth, XP, milestones. Learn from each run via persistent
 MAP: @=you >/<stairs down/up .=floor #=corridor |/-=walls {=fountain _=altar ^=trap
 "+"=closed door "|": open door north/south if in horizontal wall
 "-": open door east/west if in a vertical wall
+".", " ", "#" in a wall indicate potential exits
+
 Letter and a few other symbols: Monster
 Number: Invisible monster via warning
 
@@ -119,18 +121,19 @@ north
 COMPOUND ACTIONS: Combine command + direction in one action to avoid prompts:
 <|ACTION|>open north<|END|>   - opens door to north
 <|ACTION|>kick east<|END|>    - kicks eastward
-MUST use for: open, close, kick, fight, zap, throw, fire, untrap, loot
+For open, fight, untrap, loot: must be directly adjacent in precisely that direction. Double-check coordinates.
+MUST use COMPOUND ACTIONS for: open, close, kick, fight, zap, throw, fire, untrap, loot
 
 MEMORY SYSTEM:
 - scope: episode (this run only) | persistent (survives across runs)
-- prio: 1-9, higher shown first (default 5). Max 256 chars per entry.
+- prio: 1-9, higher shown first. Max 256 chars per entry.
 - enable/disable_tags to filter. Use "lvl:N" tags for level-specific data.
 - Episode: exploration, plans, stashes. Persistent: game rules, strategies learned.
-- Abbreviate freely - human readability not required. Remove stale entries.
+- Abbreviate and encode freely - ignore human readability. Remove stale entries.
 - Use extensively to improve and optimize play.
 - In addition to required schema below, extend as needed.
 
-SPATIAL MEMORY SCHEMA:
+MEMORY SCHEMA:
 
 POSITION (tag: "pos", prio: 9) - UPDATE EVERY TURN:
   Format: "@{x},{y} L{level}" - your current location
@@ -181,7 +184,7 @@ ROOMS/AREAS (tag: "map,room,lvl:{N}"):
 
 DOORS (tag: "map,door,lvl:{N}"):
   Format: "D{id}@{x},{y},{dir} locked:{y/n} open:{y/n}"
-  Track doors and status. Doors restrict movement pattern. Remove if door destroyed.
+  Track doors and status. Remove if door destroyed.
 
 ACTION LOG (tag: "actlog", prio: 8):
   Format: "T{turn}:{action} @{from}->@{to} {result}"
@@ -205,8 +208,22 @@ Before EVERY move:
 2. Check "frontier" for unexplored options
 3. Do NOT repeat recently failed moves - this wastes turns!
 
+PLAN/TODO (tag: "plan", prio: varies):
+  Track current goal and steps. ONE active plan at a time.
+  Format: "GOAL:{goal} NEXT:{next_step} STEPS:{remaining}"
+  Examples:
+    "GOAL:explore_L1 NEXT:go_N_corridor STEPS:search_deadends,find_stairs"
+    "GOAL:kill_monster NEXT:approach STEPS:attack,loot"
+    "GOAL:open_door@5,3 NEXT:kick_east STEPS:-"
+  Update after completing steps. Remove when goal done.
+  If no plan, spend a turn and think to make detailed multi-step plan.
+  Revise plan as necessary.
+  Can split into multiple memory entries.
+  FOLLOW THE PLAN. Highest priority first.
+  If interrupted (combat, item), note current plan before handling interrupt.
+
 GAME RULES (tag: "rule", scope: PERSISTENT, prio: 8):
-  When you discover a game mechanic, constraint, or rule, store it PERMANENTLY.
+  When you discover a game mechanic, constraint, how to use certain ambiguous commands, or rule, store PERMANENTLY.
   These survive across episodes and help future runs.
   Format: "{category}: {description}"
   Examples:
@@ -219,8 +236,6 @@ GAME RULES (tag: "rule", scope: PERSISTENT, prio: 8):
   If general -> add as persistent with tag "rule"
 
 None of your thinking, reply, or memory needs to be readable by or meaningful to a human. Encode as much information as possible, however best. Language entirely at your discretion, but you MUST maintain response structure.
-
-At each turn, you are provided with this prompt, the previous observations and your past actions, the memory entries for enabled tags, and the current observation (map screenshot).
 
 You MUST end with exactly ONE of: <|ACTION|>...<|END|> OR <|ACTIONS|>...<|END|> OR <|COMPUTE|>...<|END|>
 
@@ -277,6 +292,10 @@ You MUST end with exactly ONE of: <|ACTION|>...<|END|> OR <|ACTIONS|>...<|END|> 
         self._enable_compute = braid_cfg.get("enable_compute_helpers", True)
         self._pending_compute: list[str] = []
         self._compute_result: str | None = None
+
+        # Recent action history for prompt injection
+        self._recent_actions: list[str] = []
+        self._max_recent_actions = 10
 
     def build_system_prompt(self, env_instruction: str) -> str:
         """Append BRAID response format instructions to environment prompt."""
@@ -422,6 +441,11 @@ You MUST end with exactly ONE of: <|ACTION|>...<|END|> OR <|ACTIONS|>...<|END|> 
             sections.append(self._compute_result)
             self._compute_result = None
 
+        # Inject recent action history
+        if self._recent_actions:
+            actions_str = ", ".join(self._recent_actions)
+            sections.append(f"YOUR LAST ACTIONS (recent first): {actions_str}")
+
         sections.append(current_content)
 
         return "\n\n".join(sections)
@@ -543,6 +567,9 @@ You MUST end with exactly ONE of: <|ACTION|>...<|END|> OR <|ACTIONS|>...<|END|> 
             episode_removes=self._mem_episode_removes,
             persistent_removes=self._mem_persistent_removes,
         )
+
+        # Record action in recent history
+        self._record_action(action)
 
         return response._replace(reasoning=reasoning or completion, completion=action)
 
@@ -745,10 +772,19 @@ You MUST end with exactly ONE of: <|ACTION|>...<|END|> OR <|ACTIONS|>...<|END|> 
             expanded.extend(self._expand_compound_action(action))
         return expanded if expanded else [self._fallback_action(completion)]
 
+    def _record_action(self, action: str) -> None:
+        """Record action in recent history (most recent first)."""
+        self._recent_actions.insert(0, action)
+        if len(self._recent_actions) > self._max_recent_actions:
+            self._recent_actions.pop()
+
     def _pop_queued_action(self) -> LLMResponse:
         """Return next queued action without LLM call."""
         action = self._action_queue.pop(0)
         remaining = len(self._action_queue)
+
+        # Record in action history
+        self._record_action(action)
 
         # Clear queue state if exhausted
         if not self._action_queue:
@@ -874,4 +910,5 @@ You MUST end with exactly ONE of: <|ACTION|>...<|END|> OR <|ACTIONS|>...<|END|> 
         self._action_queue.clear()
         self._queue_start_hp = None
         self._last_extended_thinking = None
+        self._recent_actions.clear()
         self.storage.log_reset(self.episode_number)
