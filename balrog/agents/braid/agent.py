@@ -284,7 +284,15 @@ You MUST end with exactly ONE of: <|ACTION|>...<|END|> OR <|ACTIONS|>...<|END|> 
         self._queue_start_hp: int | None = None
 
         # Extended thinking preservation
-        self._preserve_extended_thinking = braid_cfg.get("preserve_extended_thinking", False)
+        # Opus 4.5+ has native thinking block preservation, so skip manual injection
+        model_id = str(config.client.model_id).lower()
+        self._is_opus = "opus" in model_id
+        preserve_cfg = braid_cfg.get("preserve_extended_thinking", False)
+        if preserve_cfg and self._is_opus:
+            # Opus handles thinking preservation natively - skip manual injection
+            self._preserve_extended_thinking = False
+        else:
+            self._preserve_extended_thinking = preserve_cfg
         self._max_extended_thinking_chars = braid_cfg.get("max_extended_thinking_chars", 8000)
         self._last_extended_thinking: str | None = None
 
