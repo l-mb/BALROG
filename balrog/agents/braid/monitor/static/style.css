@@ -57,11 +57,26 @@
     flex-direction: column;
 }
 
-.history-panel { flex: 1 1 auto; }
-.stats-panel { flex: 0 0 auto; min-width: 280px; }
+.history-panel {
+    flex: 1 1 auto;
+}
+
+.stats-panel {
+    flex: 0 0 auto;
+    min-width: 280px;
+}
+
 .memory-panel,
-.response-panel { flex: 1 1 auto; min-width: 0; min-height: 0; }
-.prompt-panel { flex: 0 0 auto; max-height: 300px; }
+.response-panel {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+}
+
+.prompt-panel {
+    flex: 0 0 auto;
+    max-height: 300px;
+}
 
 .history-list {
     flex: 1;
@@ -370,7 +385,7 @@ article header {
 }
 
 .prompt-panel .debug-content {
-    max-height: 300px;
+    max-height: 900px;
 }
 
 .debug-message {

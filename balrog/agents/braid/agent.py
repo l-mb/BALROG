@@ -41,17 +41,28 @@ MAP: @=you >/<stairs down/up .=floor #=corridor |/-=walls {=fountain _=altar ^=t
 "-": open door east/west if in a vertical wall
 ".", " ", "#" in a wall indicate potential exits
 
-Letter and a few other symbols: Monster
+Letter and a few other symbols: monster
 Number: Invisible monster via warning
 
-North=up South=down East=right West=left. Status line at bottom (HP, turn, hunger, etc).
+Directions relative to map coordinates:
+north=y increases, x unchanged
+south=y decreases, x unchanged
+west=x decreases, y unchanged
+east=x increases, y unchanged
+northeast=y increases, x increases
+southeast=y decreases, x increases
+northwest=y increases, x decreases
+southwest=y decreases, x decreases
+"next to", "adjacent"= x plus minus 1, y plus minus 1
+
+Status line at bottom (HP, turn, hunger, etc).
 
 ESSENTIALS:
 - Hunger: Eat before Weak. Safe corpses: lichen, floating eye (telepathy!). Deadly: cockatrice.
 - Prayer: 800+ turn cooldown. Elbereth protects.
 - Descend when level explored. Retreat when HP low. Pets detect mimics.
 - Stairs up from lvl:1 = INSTANT LOSS (unless carrying true Amulet of Yendor)
-- Your pet(s) will only join you on a level change if they're standing right next to you
+- Your pet(s) will only join you on a level change if right next to you
 - You might be standing on a dungeon feature that you then cannot see on the map!
 
 SECRETS: Walking into walls does NOT reveal secrets! ONLY the "search" command does.
@@ -60,12 +71,12 @@ Use search at dead-ends and suspicious walls. Search 3-4x per spot (multi-action
 EXPLORATION PROTOCOL (follow this to avoid wandering):
 1. On entering new area: note position, mark unexplored exits in "frontier" tag
 2. Explore systematically: pick ONE frontier direction, go until dead-end or junction
-3. At dead-end: search 3-4x, then mark as "searched" and backtrack to last junction
+3. At dead-end: search 3-4x, then mark as "searched" and USE travel_to TO BACKTRACK
 4. At junction: mark new exits as frontier, continue to next unexplored
 5. NEVER revisit explored areas - check "blocked", "searched", "frontier" tags first
-6. Use "far " prefix to travel as far as possible in a possible direction
-7. When all frontiers exhausted: level explored, find stairs down
-8. In rare circumstances, dungeon features CAN disappear or change. Or you might have misclassified in the past. Surrounding map takes precedence over memories. Update memories.
+6. Use travel_to for ANY movement >3 tiles to known coordinates
+7. When all explored: descend
+8. Map takes precedence over memories if they conflict. Update memories.
 
 APPLY YOUR NETHACK KNOWLEDGE. Discover rules through play and store them as persistent memory.
 
@@ -91,19 +102,24 @@ action1
 action2
 <|END|>
 
-OPTION C - Compute helper (for navigation through EXPLORED areas):
+OPTION C - Compute helper (PREFERRED for navigation >3 tiles):
 <|COMPUTE|>travel_to: @x,y<|END|>
 
-The travel_to helper auto-paths to target through explored tiles. Use it!
-Example: to return to stairs at @45,12: <|COMPUTE|>travel_to: @45,12<|END|>
+WHEN TO USE travel_to:
+- Returning to known location (stairs, altar, stash)
+- Backtracking to junction after dead-end
+- Moving >3 tiles to a specific coordinate
+- ANY time you know the destination coordinates
 
-Other compute commands (can combine multiple per block):
+travel_to auto-pathfinds through explored areas. Saves many turns vs manual movement!
+Example: <|COMPUTE|>travel_to: @45,12<|END|>
+
+Other compute commands:
 <|COMPUTE|>
 nearest: stairs_down
-distance: @10,5 -> @25,15
 pathfind: @10,5 -> @25,15
 <|END|>
-Results appear next turn as [COMPUTE]. Features: stairs_down, stairs_up, altar, fountain, sink, throne
+Features: stairs_down, stairs_up, altar, fountain, sink, throne
 
 MULTI-ACTION EXAMPLES:
 <|ACTIONS|>
@@ -118,7 +134,7 @@ search
 north
 <|END|>
 
-COMPOUND ACTIONS: Combine command + direction in one action to avoid prompts:
+COMPOUND ACTIONS: Augments earlier prompt list! Combine command + direction in one action:
 <|ACTION|>open north<|END|>   - opens door to north
 <|ACTION|>kick east<|END|>    - kicks eastward
 For open, fight, untrap, loot: must be directly adjacent in precisely that direction. Double-check coordinates.
@@ -134,10 +150,6 @@ MEMORY SYSTEM:
 - In addition to required schema below, extend as needed.
 
 MEMORY SCHEMA:
-
-POSITION (tag: "pos", prio: 9) - UPDATE EVERY TURN:
-  Format: "@{x},{y} L{level}" - your current location
-  Remove old pos entry before adding new one.
 
 BLOCKED MOVES (tag: "blocked,lvl:{N}", prio: 8):
   Format: "@{x},{y}:{dir}" - a direction that failed from this position
@@ -216,10 +228,10 @@ PLAN/TODO (tag: "plan", prio: varies):
     "GOAL:kill_monster NEXT:approach STEPS:attack,loot"
     "GOAL:open_door@5,3 NEXT:kick_east STEPS:-"
   Update after completing steps. Remove when goal done.
-  If no plan, spend a turn and think to make detailed multi-step plan.
   Revise plan as necessary.
   Can split into multiple memory entries.
-  FOLLOW THE PLAN. Highest priority first.
+  FOLLOW THE PLAN.
+  If no plan, you MUST think and make a multi-step plan.
   If interrupted (combat, item), note current plan before handling interrupt.
 
 GAME RULES (tag: "rule", scope: PERSISTENT, prio: 8):
@@ -414,7 +426,7 @@ You MUST end with exactly ONE of: <|ACTION|>...<|END|> OR <|ACTIONS|>...<|END|> 
 
         if p_entries:
             lines = [f"[{e.entry_id}] T:{e.source_step or '?'} (prio:{e.priority}) (tags: {e.tags}) {e.content}" for e in p_entries]
-            header = f"PERSISTENT ({len(p_entries)}"
+            header = f"PERSISTENT memory ({len(p_entries)}"
             if len(p_entries) >= self.max_memory_context:
                 total = self.storage.count(tags=self._enabled_tags, scope=MemoryScope.PERSISTENT)
                 hidden = total - len(p_entries)
@@ -425,7 +437,7 @@ You MUST end with exactly ONE of: <|ACTION|>...<|END|> OR <|ACTIONS|>...<|END|> 
 
         if e_entries:
             lines = [f"[{e.entry_id}] @{e.source_step or '?'} (prio:{e.priority}) (tags: {e.tags}) {e.content}" for e in e_entries]
-            header = f"EPISODE ({len(e_entries)}"
+            header = f"EPISODE memory ({len(e_entries)}"
             if len(e_entries) >= self.max_memory_context:
                 total = self.storage.count(
                     tags=self._enabled_tags, scope=MemoryScope.EPISODE, episode=self.episode_number
