@@ -1,4 +1,3 @@
-import random
 
 from nle import nle_language_obsv
 from nle.language_wrapper.wrappers import nle_language_wrapper as language_wrapper
@@ -14,7 +13,7 @@ from .render_rgb import rgb_render_image
 
 
 class NLELanguageWrapper(language_wrapper.NLELanguageWrapper):
-    def __init__(self, env, vlm=False):
+    def __init__(self, env, vlm=False, prompt_mode: str | None = None):
         super().__init__(env, use_language_action=True)
         self.nle_language = nle_language_obsv.NLELanguageObsv()
         self.language_action_space = self.create_action_space()
@@ -22,7 +21,9 @@ class NLELanguageWrapper(language_wrapper.NLELanguageWrapper):
         self.vlm = vlm
         self.done = False
 
-        if not vlm:
+        if prompt_mode:
+            self.prompt_mode = prompt_mode
+        elif not vlm:
             self.prompt_mode = "hybrid"
         else:
             self.prompt_mode = "language"
@@ -73,6 +74,8 @@ class NLELanguageWrapper(language_wrapper.NLELanguageWrapper):
             return self.render_text(nle_obsv)
         elif self.prompt_mode == "hybrid":
             return self.render_hybrid(nle_obsv)
+        elif self.prompt_mode == "map_only":
+            return self.render_map_only(nle_obsv)
         else:
             raise ValueError(f'"{self.prompt_mode}" is not a valid prompt mode.')
 
@@ -190,6 +193,34 @@ class NLELanguageWrapper(language_wrapper.NLELanguageWrapper):
         long_term_observations = [
             ("text_message", "message"),
             ("text_glyphs", "language observation"),
+            ("text_cursor", "cursor"),
+            ("map", "map"),
+        ]
+        short_term_observation = [
+            ("text_inventory", "inventory"),
+        ]
+
+        long_term_context = "\n".join([f"{name}:\n{nle_obsv[key]}\n" for key, name in long_term_observations])
+        short_term_context = "\n".join([f"{name}:\n{nle_obsv[key]}\n" for key, name in short_term_observation])
+
+        return {
+            "long_term_context": long_term_context,
+            "short_term_context": short_term_context,
+        }
+
+    def render_map_only(self, nle_obsv):
+        """Render with ASCII map only, no language observation (less confusing for LLMs)."""
+        ascii_map = self.ascii_render(nle_obsv["tty_chars"])
+        cursor = nle_obsv["tty_cursor"]
+        cursor = f"(x={cursor[1]}, y={cursor[0]})"
+        ascii_map = "\n".join(ascii_map.split("\n")[1:])  # remove first line
+
+        nle_obsv["map"] = ascii_map
+        nle_obsv["text_cursor"] = nle_obsv["text_cursor"] + "\n" + cursor
+
+        # Exclude text_glyphs (language observation) - it often contradicts the map
+        long_term_observations = [
+            ("text_message", "message"),
             ("text_cursor", "cursor"),
             ("map", "map"),
         ]

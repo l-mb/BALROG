@@ -16,11 +16,12 @@ for env_spec in gym.envs.registry.all():
 def make_nle_env(env_name, task, config, render_mode: Optional[str] = None):
     nle_kwargs = dict(config.envs.nle_kwargs)
     skip_more = nle_kwargs.pop("skip_more", False)
+    prompt_mode = nle_kwargs.pop("prompt_mode", None)
     vlm = True if config.agent.max_image_history > 0 else False
     env = gym.make(task, **nle_kwargs)
     if skip_more:
         env = AutoMore(env)
-    env = NLELanguageWrapper(env, vlm=vlm)
+    env = NLELanguageWrapper(env, vlm=vlm, prompt_mode=prompt_mode)
 
     # wrap NLE with timeout
     env = NLETimeLimit(env)
