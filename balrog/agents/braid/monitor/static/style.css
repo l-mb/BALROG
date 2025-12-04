@@ -48,42 +48,20 @@
     min-width: 620px;
 }
 
-/* History panel (in right-top row) */
-.history-panel {
-    flex: 1 1 auto;
-    display: flex;
-    flex-direction: column;
-}
-
-/* Stats panel */
-.stats-panel {
-    flex: 0 0 auto;
-    min-width: 280px;
-}
-
-.memory-panel {
-    flex: 1 1 auto;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    min-height: 0;
-}
-
-.response-panel {
-    flex: 1 1 auto;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    min-height: 0;
-}
-
-/* Prompt panel (standalone) */
+/* Panels with flex column layout */
+.history-panel,
+.memory-panel,
+.response-panel,
 .prompt-panel {
-    flex: 0 0 auto;
     display: flex;
     flex-direction: column;
-    max-height: 300px;
 }
+
+.history-panel { flex: 1 1 auto; }
+.stats-panel { flex: 0 0 auto; min-width: 280px; }
+.memory-panel,
+.response-panel { flex: 1 1 auto; min-width: 0; min-height: 0; }
+.prompt-panel { flex: 0 0 auto; max-height: 300px; }
 
 .history-list {
     flex: 1;

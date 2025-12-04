@@ -35,33 +35,6 @@ def create_app(db_path: Path) -> Starlette:
             request, "partials/agents.html", {"agents": agents, "selected": selected}
         )
 
-    async def partials_screen(request: Request) -> HTMLResponse:
-        worker_id = request.path_params["worker_id"]
-        screen = db.get_latest_screen(worker_id)
-        return templates.TemplateResponse(
-            request, "partials/screen.html", {"screen": screen}
-        )
-
-    async def partials_memory(request: Request) -> HTMLResponse:
-        entries = db.get_memory_entries(limit=50)
-        return templates.TemplateResponse(
-            request, "partials/memory.html", {"entries": entries}
-        )
-
-    async def partials_stats(request: Request) -> HTMLResponse:
-        worker_id = request.path_params["worker_id"]
-        stats = db.get_stats(worker_id)
-        return templates.TemplateResponse(
-            request, "partials/stats.html", {"stats": stats}
-        )
-
-    async def partials_response(request: Request) -> HTMLResponse:
-        worker_id = request.path_params["worker_id"]
-        response = db.get_latest_response(worker_id)
-        return templates.TemplateResponse(
-            request, "partials/response.html", {"response": response}
-        )
-
     async def partials_all(request: Request) -> HTMLResponse:
         worker_id = request.path_params["worker_id"]
 
@@ -126,10 +99,6 @@ def create_app(db_path: Path) -> Starlette:
     routes = [
         Route("/", index),
         Route("/partials/agents", partials_agents),
-        Route("/partials/screen/{worker_id}", partials_screen),
-        Route("/partials/memory/{worker_id}", partials_memory),
-        Route("/partials/stats/{worker_id}", partials_stats),
-        Route("/partials/response/{worker_id}", partials_response),
         Route("/partials/all/{worker_id}", partials_all),
         Route("/debug/{worker_id}", debug_responses),
         Mount("/static", StaticFiles(directory=MONITOR_DIR / "static"), name="static"),
