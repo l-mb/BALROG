@@ -23,7 +23,12 @@ class BRAIDAgent(BaseAgent):
     _SYSTEM_PROMPT_SUFFIX = """
 GOAL: Maximize dungeon depth, XP, milestones. Learn from each run via persistent memory.
 
-MAP: @=you >/<stairs down/up .=floor #=corridor |/-=walls +=door {=fountain _=altar ^=trap
+MAP: @=you >/<stairs down/up .=floor #=corridor |/-=walls {=fountain _=altar ^=trap
+"+"=closed door "|": open door north/south if in horizontal wall
+"-": open door east/west if in a vertical wall
+Letter and a few other symbols: Monster
+Number: Invisible monster via warning
+
 North=up South=down East=right West=left. Status line at bottom (HP, turn, hunger, etc).
 
 ESSENTIALS:
