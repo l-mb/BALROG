@@ -20,6 +20,19 @@ class BRAIDAgent(BaseAgent):
     - Adaptive thinking: LLM self-selects depth of reasoning per step
     """
 
+    # Commands that accept a direction as follow-up input
+    _DIRECTIONAL_COMMANDS = frozenset({
+        "open", "close", "kick", "fight", "force",
+        "zap", "throw", "fire", "untrap", "loot",
+    })
+
+    # Valid directions for compound actions
+    _DIRECTIONS = frozenset({
+        "north", "south", "east", "west",
+        "northeast", "northwest", "southeast", "southwest",
+        "up", "down",
+    })
+
     _SYSTEM_PROMPT_SUFFIX = """
 GOAL: Maximize dungeon depth, XP, milestones. Learn from each run via persistent memory.
 
@@ -103,6 +116,11 @@ search
 north
 <|END|>
 
+COMPOUND ACTIONS: Combine command + direction in one action to avoid prompts:
+<|ACTION|>open north<|END|>   - opens door to north
+<|ACTION|>kick east<|END|>    - kicks eastward
+MUST use for: open, close, kick, fight, zap, throw, fire, untrap, loot
+
 MEMORY SYSTEM:
 - scope: episode (this run only) | persistent (survives across runs)
 - prio: 1-9, higher shown first (default 5). Max 256 chars per entry.
@@ -172,9 +190,7 @@ ACTION LOG (tag: "actlog", prio: 8):
     "T16:east @5,3->@8,3 ok" (moved 3 tiles)
     "T17:search @8,3->@8,3 found_door_N"
     "T18:farnorth @8,3->@8,1 ok"
-    "T19:open @8,3->North pending"
   If from==to after move command, it was blocked - add to "blocked" tag!
-  "pending" actions can be used to track those that require a direction (open, kick, fight) as a second step so you do not have to think about intent. Mark as "ok" later.
   Keep last 5-10 entries. Remove stale ones.
 
 ACTION-OUTCOME PROTOCOL:
@@ -703,21 +719,31 @@ You MUST end with exactly ONE of: <|ACTION|>...<|END|> OR <|ACTIONS|>...<|END|> 
         self._compute_result = "[COMPUTE]\n" + "\n".join(results)
         self._pending_compute = []
 
+    def _expand_compound_action(self, action: str) -> list[str]:
+        """Expand compound action like 'open north' into ['open', 'north']."""
+        parts = action.lower().split()
+        if len(parts) == 2:
+            cmd, direction = parts
+            if cmd in self._DIRECTIONAL_COMMANDS and direction in self._DIRECTIONS:
+                return [cmd, direction]
+        return [action]
+
     def _parse_multi_actions(self, completion: str) -> list[str]:
         """Parse single action or multi-action block from completion."""
         # Check for <|ACTIONS|>...<|END|> block (multi-action)
         multi_match = re.search(r"<\|ACTIONS\|>(.*?)<\|END\|>", completion, re.DOTALL)
         if multi_match:
             actions = [a.strip() for a in multi_match.group(1).strip().split("\n") if a.strip()]
-            return actions if actions else [self._fallback_action(completion)]
+        elif (single_match := re.search(r"<\|ACTION\|>(.*?)<\|END\|>", completion, re.DOTALL)):
+            actions = [single_match.group(1).strip()]
+        else:
+            actions = [self._fallback_action(completion)]
 
-        # Check for single <|ACTION|>...<|END|> (normal case)
-        single_match = re.search(r"<\|ACTION\|>(.*?)<\|END\|>", completion, re.DOTALL)
-        if single_match:
-            return [single_match.group(1).strip()]
-
-        # Fallback
-        return [self._fallback_action(completion)]
+        # Expand compound actions (e.g., "open north" -> ["open", "north"])
+        expanded: list[str] = []
+        for action in actions:
+            expanded.extend(self._expand_compound_action(action))
+        return expanded if expanded else [self._fallback_action(completion)]
 
     def _pop_queued_action(self) -> LLMResponse:
         """Return next queued action without LLM call."""
