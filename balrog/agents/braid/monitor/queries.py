@@ -165,6 +165,7 @@ class MonitorDB:
                 "latency_ms": data.get("latency_ms", 0),
                 "in_tok": data.get("in_tok", 0),
                 "out_tok": data.get("out_tok", 0),
+                "raw_completion": data.get("raw_completion"),
             }
         return None
 

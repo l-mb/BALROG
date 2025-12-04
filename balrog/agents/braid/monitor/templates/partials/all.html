@@ -137,16 +137,12 @@
             <pre>{{ full_response.extended_thinking }}</pre>
           </div>
           {% endif %}
-          {% if full_response.reasoning %}
-          <div class="debug-message">
-            <div class="debug-role">reasoning (&lt;think&gt;)</div>
-            <pre>{{ full_response.reasoning }}</pre>
+          {% if full_response.raw_completion %}
+          <div class="debug-message debug-role-assistant">
+            <div class="debug-role">raw completion</div>
+            <pre>{{ full_response.raw_completion }}</pre>
           </div>
           {% endif %}
-          <div class="debug-message">
-            <div class="debug-role">action</div>
-            <pre>{{ full_response.action }}</pre>
-          </div>
           {% else %}
           <p class="muted">No response yet</p>
           {% endif %}

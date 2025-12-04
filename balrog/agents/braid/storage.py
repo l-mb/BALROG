@@ -313,6 +313,7 @@ class BraidStorage:
         extended_thinking: str | None = None,
         action_type: str = "single",  # "single", "multi", or "queued"
         compute_requests: list[str] | None = None,
+        raw_completion: str | None = None,
     ) -> None:
         data: dict[str, Any] = {
             "action": action,
@@ -334,6 +335,8 @@ class BraidStorage:
             data["extended_thinking"] = extended_thinking
         if compute_requests:
             data["compute_requests"] = compute_requests
+        if raw_completion:
+            data["raw_completion"] = raw_completion
         self._log(episode, step, "response", data)
 
     def log_memory_update(
