@@ -581,6 +581,10 @@ class ClaudeSDKWrapper(LLMClientWrapper):
         self._turn_count = 0
         self._system_prompt: str | None = None
         self._system_refresh_interval = 25  # Re-inject system prompt every N turns
+        # Track incremental messages for monitoring
+        self._last_sent: str | None = None
+        self._last_received: str | None = None
+        self._conversation_history: list[dict[str, str]] = []  # [{role, content}, ...]
 
     def _ensure_loop(self):
         """Create event loop if needed."""
@@ -633,7 +637,14 @@ class ClaudeSDKWrapper(LLMClientWrapper):
                 logger.warning(f"Error closing SDK session: {e}")
             self._client = None
         self._turn_count = 0
+        self._conversation_history = []
+        self._last_sent = None
+        self._last_received = None
         logger.info("ClaudeSDK session closed")
+
+    def get_incremental_history(self) -> list[dict[str, str]]:
+        """Return conversation history for monitoring (newest first)."""
+        return list(reversed(self._conversation_history))
 
     def generate(self, messages) -> LLMResponse:
         """Generate response using SDK session.
@@ -705,11 +716,17 @@ class ClaudeSDKWrapper(LLMClientWrapper):
 
         completion, in_tok, out_tok = self.execute_with_retries(api_call)
 
+        # Track for monitoring
+        self._last_sent = latest_content
+        self._last_received = completion.strip()
+        self._conversation_history.append({"role": "user", "content": latest_content})
+        self._conversation_history.append({"role": "assistant", "content": self._last_received})
+
         logger.info(f"ClaudeSDK usage: in={in_tok}, out={out_tok}, turn={self._turn_count}")
 
         return LLMResponse(
             model_id=self.model_id,
-            completion=completion.strip(),
+            completion=self._last_received,
             stop_reason="end_turn",
             input_tokens=in_tok,
             output_tokens=out_tok,

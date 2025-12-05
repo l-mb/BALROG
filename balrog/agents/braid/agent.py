@@ -263,6 +263,17 @@ class BRAIDAgent(BaseAgent):
         self._cumulative_llm_calls += 1
         self._episode_llm_calls += 1
         response = self.client.generate(messages)
+
+        # Log SDK incremental prompt if using claude-sdk client
+        if hasattr(self.client, "get_incremental_history"):
+            self.storage.log_sdk_prompt(
+                self.episode_number,
+                self._step,
+                sent_content=getattr(self.client, "_last_sent", "") or "",
+                received_content=getattr(self.client, "_last_received", "") or "",
+                conversation_history=self.client.get_incremental_history(),
+            )
+
         parsed = self._parse_response(response)
 
         # If queue was populated, track HP for abort detection

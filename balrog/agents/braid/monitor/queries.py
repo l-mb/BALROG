@@ -174,6 +174,40 @@ class MonitorDB:
             return {"step": row["step"], "messages": data.get("messages", [])}
         return None
 
+    def get_latest_sdk_prompt(self, worker_id: str, max_step: int | None = None) -> dict | None:
+        """Get the latest SDK incremental prompt for an agent (newest messages first)."""
+        if max_step is not None:
+            row = self.conn.execute(
+                """SELECT step, data FROM journal
+                   WHERE worker_id = ? AND event = 'sdk_prompt' AND step <= ?
+                   ORDER BY id DESC LIMIT 1""",
+                (worker_id, max_step),
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                """SELECT step, data FROM journal
+                   WHERE worker_id = ? AND event = 'sdk_prompt'
+                   ORDER BY id DESC LIMIT 1""",
+                (worker_id,),
+            ).fetchone()
+        if row and row["data"]:
+            data = json.loads(row["data"])
+            return {
+                "step": row["step"],
+                "sent": data.get("sent", ""),
+                "received": data.get("received", ""),
+                "history": data.get("history", []),  # Already newest-first
+            }
+        return None
+
+    def is_using_sdk(self, worker_id: str) -> bool:
+        """Check if agent is using claude-sdk (has sdk_prompt events)."""
+        row = self.conn.execute(
+            """SELECT 1 FROM journal WHERE worker_id = ? AND event = 'sdk_prompt' LIMIT 1""",
+            (worker_id,),
+        ).fetchone()
+        return row is not None
+
     def get_latest_full_response(
         self, worker_id: str, max_step: int | None = None, episode: int | None = None
     ) -> dict | None:

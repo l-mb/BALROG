@@ -158,8 +158,34 @@
     </div>
   </div>
 
-  <!-- Debug: Full Prompt -->
+  <!-- Debug: Prompt Panel -->
   <article class="prompt-panel">
+    {% if using_sdk and sdk_prompt %}
+    <!-- SDK Incremental View: newest messages first -->
+    <header>SDK Conversation (step {{ sdk_prompt.step }}, {{ sdk_prompt.history|length }} messages, newest first)</header>
+    <div class="debug-content">
+      <!-- Latest turn highlighted -->
+      <div class="debug-message debug-role-assistant debug-latest">
+        <div class="debug-role">LATEST ← assistant</div>
+        <pre>{{ sdk_prompt.received }}</pre>
+      </div>
+      <div class="debug-message debug-role-user debug-latest">
+        <div class="debug-role">LATEST ← user (sent)</div>
+        <pre>{{ sdk_prompt.sent }}</pre>
+      </div>
+      <!-- Full history (already newest-first) -->
+      {% if sdk_prompt.history|length > 2 %}
+      <div class="debug-history-separator">── previous turns ──</div>
+      {% for msg in sdk_prompt.history[2:] %}
+      <div class="debug-message debug-role-{{ msg.role }}">
+        <div class="debug-role">{{ msg.role }}</div>
+        <pre>{{ msg.content }}</pre>
+      </div>
+      {% endfor %}
+      {% endif %}
+    </div>
+    {% else %}
+    <!-- Traditional full prompt view -->
     <header>Full Prompt{% if full_prompt %} (step {{ full_prompt.step }}, {{ full_prompt.messages|length }} messages){% endif %}</header>
     <div class="debug-content">
       {% if full_prompt and full_prompt.messages %}
@@ -173,5 +199,6 @@
       <p class="muted">No prompt logged (enable log_full_prompt in config)</p>
       {% endif %}
     </div>
+    {% endif %}
   </article>
 </div>

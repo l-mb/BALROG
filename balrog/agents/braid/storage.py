@@ -317,6 +317,29 @@ class BraidStorage:
         if full_prompt:
             self._log(episode, step, "prompt", {"messages": full_prompt})
 
+    def log_sdk_prompt(
+        self,
+        episode: int,
+        step: int,
+        sent_content: str,
+        received_content: str,
+        conversation_history: list[dict[str, str]],
+    ) -> None:
+        """Log SDK incremental prompt (what was actually sent/received this turn).
+
+        Args:
+            episode: Current episode number.
+            step: Current step number.
+            sent_content: The message content sent to the SDK this turn.
+            received_content: The response received from the SDK this turn.
+            conversation_history: Full conversation history (newest first for display).
+        """
+        self._log(episode, step, "sdk_prompt", {
+            "sent": sent_content,
+            "received": received_content,
+            "history": conversation_history,  # Already newest-first from client
+        })
+
     def log_screen(
         self, episode: int, step: int, screen: str, dlvl: int | None = None
     ) -> None:

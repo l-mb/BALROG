@@ -67,6 +67,9 @@ def create_app(db_path: Path) -> Starlette:
         )
 
         # Get full prompt and response for debug panel (filter by episode)
+        # Check if using SDK for incremental prompt view
+        using_sdk = db.is_using_sdk(worker_id)
+        sdk_prompt = db.get_latest_sdk_prompt(worker_id, max_step=current_step) if using_sdk else None
         full_prompt = db.get_latest_prompt(worker_id, max_step=current_step)
         full_response = db.get_latest_full_response(
             worker_id, max_step=current_step, episode=current_episode
@@ -107,6 +110,8 @@ def create_app(db_path: Path) -> Starlette:
                 "max_step": max_step,
                 "full_prompt": full_prompt,
                 "full_response": full_response,
+                "sdk_prompt": sdk_prompt,
+                "using_sdk": using_sdk,
                 "visited_count": len(visited),
             },
         )

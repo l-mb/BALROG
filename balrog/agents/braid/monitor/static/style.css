@@ -437,6 +437,36 @@ article header {
     border-left-color: #1abc9c;
 }
 
+/* SDK incremental prompt styling */
+.debug-latest {
+    background: rgba(46, 204, 113, 0.1);
+    border-radius: 4px;
+    padding: 0.3rem;
+    margin-bottom: 0.3rem;
+}
+
+.debug-latest.debug-role-user {
+    background: rgba(52, 152, 219, 0.1);
+}
+
+.debug-latest .debug-role {
+    color: #2ecc71;
+    font-size: 0.65rem;
+}
+
+.debug-latest.debug-role-user .debug-role {
+    color: #3498db;
+}
+
+.debug-history-separator {
+    text-align: center;
+    font-size: 0.55rem;
+    color: var(--pico-muted-color);
+    padding: 0.5rem 0;
+    border-top: 1px dashed var(--pico-muted-border-color);
+    margin: 0.5rem 0;
+}
+
 /* Responsive */
 @media (max-width: 1400px) {
     .main-columns {
