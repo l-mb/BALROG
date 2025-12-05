@@ -103,7 +103,7 @@ Diagonal: NE=y--,x++  SE=y++,x++  NW=y--,x--  SW=y++,x--
 Open doors: | in horizontal wall (N/S), - in vertical wall (E/W)
 Hidden exits: . or space or # in wall = possible secret door
 
-MEMORY TAGS (use lvl:N suffix for level-specific, expand as needed):
+MEMORY TAGS (use lvl:N suffix for level-specific):
   blocked,lvl:N     - "@x,y:dir" blocked moves (CHECK BEFORE MOVING!)
   frontier,lvl:N    - "@x,y:dir" unexplored directions
   searched,lvl:N    - "@x,y n:N" searched N times (stop after 3)
@@ -122,7 +122,10 @@ SAVE AS PERSISTENT RULE when:
 - When not yet sure about long-term value, save as "episode" rule first, promote later
 Format: {"scope": "persistent", "tags": "rule", "prio": 8, "content": "category: discovery"}
 
-Memory is crucial to reduce thinking needs and improve play
+MEMORY GUIDANCE:
+- Crucial to improve benchmark outcomes
+- Use to AVOID repeated actions with stable outcomes
+- Above is guidance, but you can expand as needed within structure
 
 NETHACK ESSENTIALS:
 - Eat before Weak. Safe corpses: lichen, floating eye. Deadly: cockatrice.
@@ -149,6 +152,8 @@ GOAL: Maximize dungeon depth, XP, milestones. Learn from each run.
 
 Apply your NetHack knowledge. Store discoveries as persistent rules.
 Map takes precedence over stale memories. Check "blocked" before moving.
+
+Memory and thinking are for agent use only. Disregard all readability, grammar, language concerns.
 
 You MUST have ONE plan. If NO PLAN, think and memorize detailed plan.
 If you HAVE a plan, follow it. Mark achieved todos completed.

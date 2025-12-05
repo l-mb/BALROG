@@ -677,10 +677,109 @@ def _order_perimeter(
     return ordered
 
 
+def _is_dark_room(
+    glyphs: np.ndarray, room_tiles: set[tuple[int, int]], pos: tuple[int, int]
+) -> bool:
+    """Check if this appears to be a dark room (limited visibility).
+
+    Dark rooms show only tiles adjacent to player, surrounded by unexplored stone.
+    """
+    rows, cols = glyphs.shape
+    px, py = pos
+
+    # Check if any room tile borders unexplored stone (not walls)
+    # In dark rooms, the edge of visibility is stone, not walls
+    stone_neighbors = 0
+    for x, y in room_tiles:
+        for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+            nx, ny = x + dx, y + dy
+            if 0 <= ny < rows and 0 <= nx < cols:
+                if (nx, ny) not in room_tiles:
+                    if glyphs[ny, nx] == S_STONE:
+                        stone_neighbors += 1
+
+    # If most perimeter is unexplored stone (not walls), it's likely a dark room
+    # Small visible area + stone borders = dark room
+    return len(room_tiles) <= 12 and stone_neighbors >= 3
+
+
+def _plan_dark_room_exploration(
+    glyphs: np.ndarray, room_tiles: set[tuple[int, int]], pos: tuple[int, int]
+) -> list[str]:
+    """Plan exploration for dark room by moving toward unexplored edges.
+
+    In dark rooms, we can't see the full room. Strategy:
+    1. Find directions with unexplored stone (potential room continuation)
+    2. Move toward those directions to reveal more
+    3. Search along the way
+    """
+    rows, cols = glyphs.shape
+    px, py = pos
+
+    # Find tiles at edge of visibility that border unexplored stone
+    frontier_tiles = []
+    for x, y in room_tiles:
+        for dir_name, (dy, dx) in DIRS.items():
+            nx, ny = x + dx, y + dy
+            if 0 <= ny < rows and 0 <= nx < cols:
+                if glyphs[ny, nx] == S_STONE:
+                    frontier_tiles.append((x, y, dir_name))
+
+    if not frontier_tiles:
+        # No unexplored edges - room might be fully visible now
+        return []
+
+    # Group by direction to find primary exploration direction
+    dir_counts: dict[str, list[tuple[int, int]]] = {}
+    for x, y, dir_name in frontier_tiles:
+        base_dir = dir_name.replace("north", "n").replace("south", "s").replace("east", "e").replace("west", "w")
+        if base_dir not in dir_counts:
+            dir_counts[base_dir] = []
+        dir_counts[base_dir].append((x, y))
+
+    # Pick direction with most unexplored neighbors
+    best_dir = max(dir_counts.keys(), key=lambda d: len(dir_counts[d]))
+    target_tiles = dir_counts[best_dir]
+
+    # Find the furthest tile in that direction from player
+    if "n" in best_dir:
+        target = min(target_tiles, key=lambda t: t[1])  # lowest y
+    elif "s" in best_dir:
+        target = max(target_tiles, key=lambda t: t[1])  # highest y
+    elif "e" in best_dir:
+        target = max(target_tiles, key=lambda t: t[0])  # highest x
+    elif "w" in best_dir:
+        target = min(target_tiles, key=lambda t: t[0])  # lowest x
+    else:
+        target = target_tiles[0]
+
+    # Path to target, search, then continue in that direction
+    extra_walkable = set(room_tiles) | {pos}
+    path = pathfind(glyphs, pos, target, extra_walkable)
+
+    actions = []
+    if path:
+        actions.extend(path)
+        actions.append("search")
+
+        # Add a few more steps in the exploration direction to reveal more
+        # Map short direction name back to full name
+        dir_map = {"n": "north", "s": "south", "e": "east", "w": "west",
+                   "ne": "northeast", "nw": "northwest", "se": "southeast", "sw": "southwest"}
+        if best_dir in dir_map:
+            # Try to continue in that direction (will stop if hits wall)
+            actions.extend([dir_map[best_dir]] * 3)
+            actions.append("search")
+
+    return actions
+
+
 def plan_room_exploration(
     glyphs: np.ndarray, room_tiles: set[tuple[int, int]], pos: tuple[int, int]
 ) -> list[str]:
     """Plan efficient perimeter walk with searches.
+
+    For dark rooms (limited visibility), uses expanding exploration instead.
 
     Args:
         glyphs: 2D glyph array from observation
@@ -690,6 +789,10 @@ def plan_room_exploration(
     Returns:
         List of actions (directions + "search")
     """
+    # Check if this is a dark room with limited visibility
+    if _is_dark_room(glyphs, room_tiles, pos):
+        return _plan_dark_room_exploration(glyphs, room_tiles, pos)
+
     # Find and order perimeter
     perimeter = _find_perimeter(room_tiles)
     if not perimeter:
@@ -804,14 +907,33 @@ def plan_corridor_exploration(
     corridor_set = set(corridor)
     rows, cols = glyphs.shape
 
+    # Find ALL visible corridor tiles on the map (not just detected ones)
+    all_visible_corridors: set[tuple[int, int]] = set()
+    for row in range(rows):
+        for col in range(cols):
+            cmap_idx = int(glyphs[row, col]) - CMAP_OFF
+            if cmap_idx in CORRIDOR_CMAP:
+                all_visible_corridors.add((col, row))
+
     # All corridor tiles should be walkable for pathfinding
-    # (some may have player/monster glyphs overlaying them)
-    extra_walkable = set(corridor_set)
+    # Include both detected corridor set AND all visible corridor glyphs
+    extra_walkable = set(corridor_set) | all_visible_corridors
     extra_walkable.add(pos)
+
+    # Also add adjacent door tiles as walkable (player might be in doorway)
+    for dy, dx in DIRS.values():
+        nx, ny = pos[0] + dx, pos[1] + dy
+        if 0 <= ny < rows and 0 <= nx < cols:
+            cmap_idx = int(glyphs[ny, nx]) - CMAP_OFF
+            if cmap_idx in DOOR_CMAP:
+                extra_walkable.add((nx, ny))
 
     # Find monsters/pets on corridor - also treat as walkable
     monsters = _find_monsters_on_corridor(glyphs, corridor_set)
     extra_walkable |= monsters
+
+    # Expand corridor_set to include all visible corridors for target selection
+    corridor_set = corridor_set | all_visible_corridors
 
     # Find tiles adjacent to rooms (floor tiles) - we want to explore AWAY from these
     room_adjacent_tiles: set[tuple[int, int]] = set()
