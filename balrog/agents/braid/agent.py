@@ -101,7 +101,12 @@ class BRAIDAgent(BaseAgent):
 
         # Recent action history for prompt injection
         self._recent_actions: list[str] = []
+        self._recent_action_outputs: list[str] = []  # Formatted action summaries
         self._max_recent_actions = 10
+
+        # Extended thinking detection (for model-specific prompt formatting)
+        self._thinking_budget = config.client.generate_kwargs.get("thinking_budget", 0)
+        self._has_extended_thinking = self._is_opus or self._thinking_budget > 0
 
         # Current game turn (from blstats) for correcting actlog entries
         self._current_game_turn: int | None = None
@@ -260,10 +265,16 @@ class BRAIDAgent(BaseAgent):
             sections.append(self._compute_result)
             self._compute_result = None
 
-        # Inject recent action history
-        if self._recent_actions:
-            actions_str = ", ".join(self._recent_actions)
-            sections.append(f"YOUR LAST ACTIONS (recent first): {actions_str}")
+        # Inject recent action history (model-specific format)
+        if self._recent_action_outputs:
+            if self._has_extended_thinking:
+                # Extended thinking models: show compact action outputs only
+                actions_str = " | ".join(self._recent_action_outputs)
+                sections.append(f"RECENT ACTIONS: {actions_str}")
+            else:
+                # Non-thinking models (Haiku): show verbose action list
+                actions_str = ", ".join(self._recent_actions)
+                sections.append(f"YOUR LAST ACTIONS (recent first): {actions_str}")
 
         sections.append(current_content)
 
@@ -388,8 +399,9 @@ class BRAIDAgent(BaseAgent):
             persistent_removes=self._mem_persistent_removes,
         )
 
-        # Record action in recent history
+        # Record action in recent history (with formatted output for extended thinking models)
         self._record_action(action)
+        self._record_action_output(actions, self._pending_compute if self._pending_compute else None)
 
         return response._replace(reasoning=reasoning or completion, completion=action)
 
@@ -691,6 +703,14 @@ class BRAIDAgent(BaseAgent):
                 results.append(f"UNKNOWN: {request}")
 
         self._compute_result = "[COMPUTE]\n" + "\n".join(results)
+
+        # Log compute helper usage for debugging
+        self.storage.log_compute(
+            episode=self.episode_number,
+            step=self._step,
+            requests=self._pending_compute,
+            results=results,
+        )
         self._pending_compute = []
 
     def _expand_compound_action(self, action: str) -> list[str]:
@@ -729,13 +749,28 @@ class BRAIDAgent(BaseAgent):
         if len(self._recent_actions) > self._max_recent_actions:
             self._recent_actions.pop()
 
+    def _record_action_output(self, actions: list[str], compute_requests: list[str] | None) -> None:
+        """Record formatted action output for extended thinking model prompts."""
+        if compute_requests:
+            output = f"COMPUTE:{compute_requests[0][:30]}"
+        elif len(actions) > 1:
+            abbrev = ",".join(actions[:5])
+            output = f"ACTIONS:[{abbrev}...]" if len(actions) > 5 else f"ACTIONS:[{abbrev}]"
+        else:
+            output = f"ACTION:{actions[0]}"
+
+        self._recent_action_outputs.insert(0, output)
+        if len(self._recent_action_outputs) > self._max_recent_actions:
+            self._recent_action_outputs.pop()
+
     def _pop_queued_action(self) -> LLMResponse:
         """Return next queued action without LLM call."""
         action = self._action_queue.pop(0)
         remaining = len(self._action_queue)
 
-        # Record in action history
+        # Record in action history (queued actions are single actions)
         self._record_action(action)
+        self._record_action_output([action], None)
 
         # Clear queue state if exhausted
         if not self._action_queue:
@@ -868,4 +903,5 @@ class BRAIDAgent(BaseAgent):
         self._last_glyphs = None
         self._last_extended_thinking = None
         self._recent_actions.clear()
+        self._recent_action_outputs.clear()
         self.storage.log_reset(self.episode_number, str(self.config.client.model_id))
