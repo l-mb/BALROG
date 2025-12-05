@@ -802,6 +802,7 @@ def plan_corridor_exploration(
         return []
 
     corridor_set = set(corridor)
+    rows, cols = glyphs.shape
 
     # All corridor tiles should be walkable for pathfinding
     # (some may have player/monster glyphs overlaying them)
@@ -812,6 +813,17 @@ def plan_corridor_exploration(
     monsters = _find_monsters_on_corridor(glyphs, corridor_set)
     extra_walkable |= monsters
 
+    # Find tiles adjacent to rooms (floor tiles) - we want to explore AWAY from these
+    room_adjacent_tiles: set[tuple[int, int]] = set()
+    for x, y in corridor_set:
+        for dy, dx in DIRS.values():
+            nx, ny = x + dx, y + dy
+            if 0 <= ny < rows and 0 <= nx < cols:
+                cmap_idx = int(glyphs[ny, nx]) - CMAP_OFF
+                if cmap_idx in FLOOR_CMAP:
+                    room_adjacent_tiles.add((x, y))
+                    break
+
     # Find exploration frontiers (tiles adjacent to unexplored stone)
     frontiers = _find_corridor_frontiers(glyphs, corridor_set)
 
@@ -821,35 +833,62 @@ def plan_corridor_exploration(
         if _count_walkable_neighbors(glyphs, t, corridor_set) == 1
     ]
 
-    # Build target list: frontiers first (sorted by distance), then dead-ends
+    # Build target list: prioritize targets AWAY from rooms
+    # Frontiers not adjacent to rooms come first, then frontiers near rooms
     targets = []
 
-    # Add frontiers (prioritize tiles with more unexplored directions)
     frontier_tiles = [(x, y) for x, y, _ in frontiers]
-    frontier_tiles.sort(key=lambda t: (
-        -len([d for x, y, d in frontiers if (x, y) == t][0] if frontiers else ""),
-        distance(pos[0], pos[1], t[0], t[1])
-    ))
-    for t in frontier_tiles:
+
+    # Separate frontiers: away from rooms vs near rooms
+    frontiers_away = [t for t in frontier_tiles if t not in room_adjacent_tiles]
+    frontiers_near_room = [t for t in frontier_tiles if t in room_adjacent_tiles]
+
+    # Sort each group by unexplored directions count, then distance
+    def frontier_sort_key(t: tuple[int, int]) -> tuple[int, int]:
+        dirs = next((d for x, y, d in frontiers if (x, y) == t), "")
+        return (-len(dirs), distance(pos[0], pos[1], t[0], t[1]))
+
+    frontiers_away.sort(key=frontier_sort_key)
+    frontiers_near_room.sort(key=frontier_sort_key)
+
+    # Add away-from-room frontiers first
+    for t in frontiers_away:
         if t not in targets:
             targets.append(t)
 
-    # Add dead-ends that aren't already in targets
-    dead_ends.sort(key=lambda t: distance(pos[0], pos[1], t[0], t[1]))
-    for t in dead_ends:
+    # Then frontiers near rooms
+    for t in frontiers_near_room:
         if t not in targets:
             targets.append(t)
 
-    # If no frontiers or dead-ends, walk to all corridor endpoints
+    # Add dead-ends (prioritize those away from rooms)
+    dead_ends_away = [t for t in dead_ends if t not in room_adjacent_tiles]
+    dead_ends_near = [t for t in dead_ends if t in room_adjacent_tiles]
+
+    dead_ends_away.sort(key=lambda t: distance(pos[0], pos[1], t[0], t[1]))
+    dead_ends_near.sort(key=lambda t: distance(pos[0], pos[1], t[0], t[1]))
+
+    for t in dead_ends_away:
+        if t not in targets:
+            targets.append(t)
+    for t in dead_ends_near:
+        if t not in targets:
+            targets.append(t)
+
+    # If no frontiers or dead-ends, walk to corridor endpoints (away from rooms first)
     if not targets:
-        # Find endpoints (tiles with only 1 corridor neighbor)
         endpoints = [
             t for t in corridor
             if sum(1 for dy, dx in DIRS.values() if (t[0] + dx, t[1] + dy) in corridor_set) == 1
         ]
-        # Sort by distance, furthest first to explore more
-        endpoints.sort(key=lambda t: -distance(pos[0], pos[1], t[0], t[1]))
-        targets = endpoints
+        endpoints_away = [t for t in endpoints if t not in room_adjacent_tiles]
+        endpoints_near = [t for t in endpoints if t in room_adjacent_tiles]
+
+        # Furthest first for exploration
+        endpoints_away.sort(key=lambda t: -distance(pos[0], pos[1], t[0], t[1]))
+        endpoints_near.sort(key=lambda t: -distance(pos[0], pos[1], t[0], t[1]))
+
+        targets = endpoints_away + endpoints_near
 
     # Still no targets? Just walk to furthest corridor tile
     if not targets and len(corridor) > 1:
