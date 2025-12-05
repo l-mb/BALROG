@@ -886,23 +886,13 @@ def plan_room_exploration(
                     actions = list(path)
                     actions.append("search")
                     return actions
-            else:
-                # All perimeter visited - try walking in each cardinal direction to reveal more
-                # Pick direction toward furthest wall from current position
-                perimeter_list = list(perimeter)
-                if perimeter_list:
-                    furthest = max(perimeter_list, key=lambda t: distance(pos[0], pos[1], t[0], t[1]))
-                    dx = furthest[0] - pos[0]
-                    dy = furthest[1] - pos[1]
-                    # Determine primary direction
-                    if abs(dx) > abs(dy):
-                        dir_name = "east" if dx > 0 else "west"
-                    else:
-                        dir_name = "south" if dy > 0 else "north"
-                    # Try walking that direction to reveal more room
-                    return [dir_name, dir_name, "search"]
+            # All perimeter visited in small room - room is fully explored
+            # Don't try walking into walls, that causes infinite loops
 
-    # Fallback: perimeter walk (when no visited data or all tiles visited)
+        # All tiles visited, no frontiers - room fully explored
+        return []
+
+    # Fallback: perimeter walk (only when no visited data available)
     perimeter_list = _find_perimeter(room_tiles)
     if not perimeter_list:
         return []
@@ -1056,17 +1046,12 @@ def plan_corridor_exploration(
             return actions
         # All visible corridor tiles visited - check for frontiers to expand into
 
-    # Find exploration frontiers (tiles adjacent to unexplored stone)
-    frontiers = _find_corridor_frontiers(glyphs, corridor_set)
+        # Find exploration frontiers (tiles adjacent to unexplored stone)
+        frontiers = _find_corridor_frontiers(glyphs, corridor_set)
 
-    # If all visible tiles visited but frontiers exist, walk toward frontier and continue
-    # This reveals more corridor tiles that weren't visible before
-    if visited and frontiers:
-        # Find frontier tile furthest from rooms (most likely to lead somewhere new)
-        frontier_tiles = [(x, y) for x, y, dirs in frontiers]
-
-        # Pick frontier furthest from current position (explore outward)
-        if frontier_tiles:
+        # If frontiers exist, walk toward them to reveal more corridor
+        if frontiers:
+            frontier_tiles = [(x, y) for x, y, dirs in frontiers]
             target = max(frontier_tiles, key=lambda t: distance(pos[0], pos[1], t[0], t[1]))
             path = pathfind(glyphs, pos, target, extra_walkable | visited)
             if path:
@@ -1080,6 +1065,12 @@ def plan_corridor_exploration(
                         actions.append("search")
                         break
                 return actions
+
+        # All tiles visited, no frontiers - corridor fully explored
+        return []
+
+    # Fallback: no visited data, use heuristic exploration
+    frontiers = _find_corridor_frontiers(glyphs, corridor_set)
 
     # Find tiles adjacent to rooms (floor tiles) - we want to explore AWAY from these
     room_adjacent_tiles: set[tuple[int, int]] = set()

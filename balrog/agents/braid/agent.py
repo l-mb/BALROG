@@ -93,6 +93,7 @@ class BRAIDAgent(BaseAgent):
         self._batch_source: str | None = None  # Command that created batch
         self._batch_total: int = 0  # Original queue size
         self._batch_executed: int = 0  # Actions executed so far
+        self._max_explore_actions: int = 100  # Safety limit for explore_room/corridor
 
         # Compute helpers state
         self._enable_compute = braid_cfg.get("enable_compute_helpers", True)
@@ -530,11 +531,25 @@ class BRAIDAgent(BaseAgent):
         if not self._action_queue:
             return False
 
+        # Safety limit: abort if explore_room/corridor exceeds max actions
+        if self._batch_source in ("explore_room", "explore_corridor"):
+            if self._batch_executed >= self._max_explore_actions:
+                self.storage.log_error(
+                    self.episode_number, self._step,
+                    f"Explore limit reached: {self._batch_executed} actions"
+                )
+                return True
+
         text = obs.get("text", {}).get("long_term_context", "")
         text_lower = text.lower()
 
         # Abort on interactive prompts
         if self._is_interactive_prompt(text):
+            return True
+
+        # Abort on hunger warnings (Hungry, Weak, Fainting)
+        hunger_patterns = ["hungry", "weak", "fainting", "faint from lack of food"]
+        if any(p in text_lower for p in hunger_patterns):
             return True
 
         # Pet interactions are normal, don't abort
@@ -1011,6 +1026,10 @@ class BRAIDAgent(BaseAgent):
             return False
 
         if self._batch_source not in ("explore_room", "explore_corridor"):
+            return False
+
+        # Don't continue if we've hit the safety limit
+        if self._batch_executed >= self._max_explore_actions:
             return False
 
         # Get current observation data
