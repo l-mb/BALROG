@@ -578,9 +578,10 @@ class ClaudeSDKWrapper(LLMClientWrapper):
         import asyncio
         self._loop: asyncio.AbstractEventLoop | None = None
         self._client = None  # ClaudeSDKClient instance
-        self._turn_count = 0
+        self._llm_call_count = 0  # Actual LLM calls (not agent steps)
         self._system_prompt: str | None = None
-        self._system_refresh_interval = 25  # Re-inject system prompt every N turns
+        # Re-inject system prompt every N LLM calls (0 = never refresh)
+        self._system_refresh_interval = self.client_kwargs.get("system_refresh_interval", 100)
         # Track incremental messages for monitoring
         self._last_sent: str | None = None
         self._last_received: str | None = None
@@ -596,7 +597,7 @@ class ClaudeSDKWrapper(LLMClientWrapper):
         """Start new SDK session with system prompt."""
         self._ensure_loop()
         self._system_prompt = system_prompt
-        self._turn_count = 0
+        self._llm_call_count = 0
 
         # Get thinking budget from client kwargs
         thinking_budget = self.client_kwargs.get("thinking_budget", 0)
@@ -667,9 +668,12 @@ class ClaudeSDKWrapper(LLMClientWrapper):
                 # No system prompt - initialize with empty
                 self._initialize_session("")
 
-        # Periodic system prompt refresh
-        self._turn_count += 1
-        needs_refresh = (self._turn_count % self._system_refresh_interval == 0)
+        # Periodic system prompt refresh (0 = disabled)
+        self._llm_call_count += 1
+        needs_refresh = (
+            self._system_refresh_interval > 0
+            and self._llm_call_count % self._system_refresh_interval == 0
+        )
 
         # Get only the latest user message (new observation)
         # SDK maintains conversation history
@@ -677,7 +681,7 @@ class ClaudeSDKWrapper(LLMClientWrapper):
 
         if needs_refresh and self._system_prompt:
             latest_content = f"[CONTEXT REFRESH - Remember these instructions]\n{self._system_prompt}\n\n[Current observation]\n{latest_content}"
-            logger.debug(f"Refreshing system prompt at turn {self._turn_count}")
+            logger.debug(f"Refreshing system prompt at LLM call {self._llm_call_count}")
 
         self._ensure_loop()
 

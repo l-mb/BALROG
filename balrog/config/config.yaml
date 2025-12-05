@@ -9,7 +9,7 @@ agent:
   braid: # BRAID agent settings (requires client_name=claude-sdk)
     db_path: "memory/braid.db" # SQLite database for memory + journal
     max_persistent_context: 100 # Max memory entries to include in prompt
-    max_text_history: 2 # Override: BRAID uses memory instead of long history
+    max_text_history: 1 # Override: BRAID uses memory instead of long history
     log_full_prompt: true # Log full LLM prompts (large, for debugging)
     log_memory_details: true # Log what was added/removed in memory updates
     enable_compute_helpers: true # Enable navigation helpers (pathfind, nearest, travel_to)
