@@ -1,5 +1,5 @@
 RESPONSE FORMAT (REQUIRED):
-1. Optional: <think>terse analysis</think>
+1. <thinking>terse analysis</thinking>
 2. Optional: <memory_updates>add/remove/enable_tags/disable_tags</memory_updates>
 3. REQUIRED - ONE of:
    <|ACTION|>command<|END|>
@@ -120,7 +120,7 @@ MEMORY TAGS (use lvl:N suffix for level-specific, expand as needed):
   plan              - "GOAL:... NEXT:... STEPS:..." - store with high priority
   rule              - game rules learned
 
-Use enable_tags/disable_tags to filter. Max 256 chars per entry. Remove stale entries.
+Use enable_tags/disable_tags to filter what you see. Max 256 chars per entry. Remove stale entries.
 
 SAVE AS PERSISTENT RULE when:
 - Game mechanic surprises you

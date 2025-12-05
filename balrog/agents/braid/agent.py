@@ -38,6 +38,14 @@ class BRAIDAgent(BaseAgent):
     _SYSTEM_PROMPT_SUFFIX = _PROMPT_FILE.read_text().strip()
 
     def __init__(self, client_factory: Any, prompt_builder: Any, config: Any):
+        # BRAID requires Claude SDK for session-based context management
+        client_name = config.client.client_name.lower()
+        if client_name != "claude-sdk":
+            raise ValueError(
+                f"BRAIDAgent requires client_name='claude-sdk', got '{client_name}'. "
+                f"Supported models: claude-haiku-4-5, claude-sonnet-4, claude-opus-4-5"
+            )
+
         super().__init__(client_factory, prompt_builder)
         self.config = config
         braid_cfg = config.agent.braid
@@ -86,32 +94,10 @@ class BRAIDAgent(BaseAgent):
         self._batch_total: int = 0  # Original queue size
         self._batch_executed: int = 0  # Actions executed so far
 
-        # Extended thinking preservation
-        # Opus 4.5+ has native thinking block preservation, so skip manual injection
-        model_id = str(config.client.model_id).lower()
-        self._is_opus = "opus" in model_id
-        preserve_cfg = braid_cfg.get("preserve_extended_thinking", False)
-        if preserve_cfg and self._is_opus:
-            # Opus handles thinking preservation natively - skip manual injection
-            self._preserve_extended_thinking = False
-        else:
-            self._preserve_extended_thinking = preserve_cfg
-        self._max_extended_thinking_chars = braid_cfg.get("max_extended_thinking_chars", 8000)
-        self._last_extended_thinking: str | None = None
-
         # Compute helpers state
         self._enable_compute = braid_cfg.get("enable_compute_helpers", True)
         self._pending_compute: list[str] = []
         self._compute_result: str | None = None
-
-        # Recent action history for prompt injection
-        self._recent_actions: list[str] = []
-        self._recent_action_outputs: list[str] = []  # Formatted action summaries
-        self._max_recent_actions = 10
-
-        # Extended thinking detection (for model-specific prompt formatting)
-        self._thinking_budget = config.client.generate_kwargs.get("thinking_budget", 0)
-        self._has_extended_thinking = self._is_opus or self._thinking_budget > 0
 
         # Current game turn (from blstats) for correcting actlog entries
         self._current_game_turn: int | None = None
@@ -164,7 +150,6 @@ class BRAIDAgent(BaseAgent):
                     self.episode_number, self._step,
                     f"Queue aborted ({len(self._action_queue)} actions remaining)"
                 )
-                self._record_batch_summary(completed=False)
                 self._clear_batch_state()
             else:
                 # Check for newly discovered traps and re-plan if needed
@@ -225,8 +210,7 @@ class BRAIDAgent(BaseAgent):
                 )
                 return action_response
             else:
-                # Exploration complete, record batch summary
-                self._record_batch_summary(completed=True)
+                # Exploration complete
                 self._clear_batch_state()
 
         self.prompt_builder.update_observation(obs)
@@ -264,15 +248,14 @@ class BRAIDAgent(BaseAgent):
         self._episode_llm_calls += 1
         response = self.client.generate(messages)
 
-        # Log SDK incremental prompt if using claude-sdk client
-        if hasattr(self.client, "get_incremental_history"):
-            self.storage.log_sdk_prompt(
-                self.episode_number,
-                self._step,
-                sent_content=getattr(self.client, "_last_sent", "") or "",
-                received_content=getattr(self.client, "_last_received", "") or "",
-                conversation_history=self.client.get_incremental_history(),
-            )
+        # Log SDK incremental prompt (SDK-only, always available)
+        self.storage.log_sdk_prompt(
+            self.episode_number,
+            self._step,
+            sent_content=getattr(self.client, "_last_sent", "") or "",
+            received_content=getattr(self.client, "_last_received", "") or "",
+            conversation_history=self.client.get_incremental_history(),
+        )
 
         parsed = self._parse_response(response)
 
@@ -330,25 +313,10 @@ class BRAIDAgent(BaseAgent):
         if tag_info:
             sections.append(tag_info)
 
-        # Inject previous extended thinking if preserved
-        if self._preserve_extended_thinking and self._last_extended_thinking:
-            sections.append(f"PREVIOUS REASONING (from last turn):\n{self._last_extended_thinking}")
-
         # Inject compute results if available
         if self._compute_result:
             sections.append(self._compute_result)
             self._compute_result = None
-
-        # Inject recent action history (model-specific format)
-        if self._recent_action_outputs:
-            if self._has_extended_thinking:
-                # Extended thinking models: show compact action outputs only
-                actions_str = " | ".join(self._recent_action_outputs)
-                sections.append(f"RECENT ACTIONS: {actions_str}")
-            else:
-                # Non-thinking models (Haiku): show verbose action list
-                actions_str = ", ".join(self._recent_actions)
-                sections.append(f"YOUR LAST ACTIONS (recent first): {actions_str}")
 
         sections.append(current_content)
 
@@ -453,16 +421,6 @@ class BRAIDAgent(BaseAgent):
             total_llm_calls=self._cumulative_llm_calls,
         )
 
-        # Store extended thinking for next turn if enabled
-        if self._preserve_extended_thinking:
-            ext = getattr(response, "extended_thinking", None)
-            if ext:
-                if len(ext) > self._max_extended_thinking_chars:
-                    ext = ext[: self._max_extended_thinking_chars] + "\n[...truncated]"
-                self._last_extended_thinking = ext
-            else:
-                self._last_extended_thinking = None
-
         # Log memory updates
         self.storage.log_memory_update(
             episode=self.episode_number,
@@ -477,10 +435,6 @@ class BRAIDAgent(BaseAgent):
             episode_removes=self._mem_episode_removes,
             persistent_removes=self._mem_persistent_removes,
         )
-
-        # Record action in recent history (with formatted output for extended thinking models)
-        self._record_action(action)
-        self._record_action_output(actions, self._pending_compute if self._pending_compute else None)
 
         return response._replace(reasoning=reasoning or completion, completion=action)
 
@@ -1017,36 +971,6 @@ class BRAIDAgent(BaseAgent):
             expanded.extend(self._expand_compound_action(action))
         return expanded if expanded else [self._fallback_action(completion)]
 
-    def _record_action(self, action: str) -> None:
-        """Record action in recent history (most recent first)."""
-        self._recent_actions.insert(0, action)
-        if len(self._recent_actions) > self._max_recent_actions:
-            self._recent_actions.pop()
-
-    def _record_action_output(self, actions: list[str], compute_requests: list[str] | None) -> None:
-        """Record formatted action output for extended thinking model prompts."""
-        if compute_requests:
-            output = f"COMPUTE:{compute_requests[0][:30]}"
-        elif len(actions) > 1:
-            abbrev = ",".join(actions[:5])
-            output = f"ACTIONS:[{abbrev}...]" if len(actions) > 5 else f"ACTIONS:[{abbrev}]"
-        else:
-            output = f"ACTION:{actions[0]}"
-
-        self._recent_action_outputs.insert(0, output)
-        if len(self._recent_action_outputs) > self._max_recent_actions:
-            self._recent_action_outputs.pop()
-
-    def _record_batch_summary(self, completed: bool) -> None:
-        """Record batch execution summary to action history."""
-        if not self._batch_source:
-            return
-        status = "done" if completed else "aborted"
-        summary = f"{self._batch_source}: {self._batch_executed}/{self._batch_total} {status}"
-        self._recent_action_outputs.insert(0, summary)
-        if len(self._recent_action_outputs) > self._max_recent_actions:
-            self._recent_action_outputs.pop()
-
     def _clear_batch_state(self) -> None:
         """Clear all batch/queue tracking state."""
         self._action_queue.clear()
@@ -1063,11 +987,8 @@ class BRAIDAgent(BaseAgent):
         remaining = len(self._action_queue)
         self._batch_executed += 1
 
-        # Record batch summary and clear state when exhausted
-        if not self._action_queue:
-            self._record_batch_summary(completed=True)
-            # Note: Don't clear batch state yet - _auto_continue_exploration may refill queue
-            # The state will be cleared in act() after checking for continuation
+        # Note: Don't clear batch state yet - _auto_continue_exploration may refill queue
+        # The state will be cleared in act() after checking for continuation
 
         return LLMResponse(
             model_id="queued",
@@ -1258,9 +1179,6 @@ class BRAIDAgent(BaseAgent):
         self._batch_source = None
         self._batch_total = 0
         self._batch_executed = 0
-        self._last_extended_thinking = None
-        self._recent_actions.clear()
-        self._recent_action_outputs.clear()
         self.storage.log_reset(self.episode_number, str(self.config.client.model_id))
 
     def on_episode_end(self) -> None:
