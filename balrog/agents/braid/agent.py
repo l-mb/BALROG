@@ -167,6 +167,8 @@ class BRAIDAgent(BaseAgent):
                 self._record_batch_summary(completed=False)
                 self._clear_batch_state()
             else:
+                # Check for newly discovered traps and re-plan if needed
+                self._check_and_replan_for_traps(obs)
                 self._step += 1
                 # Log position for queued action
                 if pos_info:
@@ -493,14 +495,20 @@ class BRAIDAgent(BaseAgent):
             return False
 
         text = obs.get("text", {}).get("long_term_context", "")
+        text_lower = text.lower()
 
         # Abort on interactive prompts
         if self._is_interactive_prompt(text):
             return True
 
-        # Abort on combat indicators
+        # Pet interactions are normal, don't abort
+        pet_patterns = ["swap places", "your kitten", "your cat", "your dog", "your pony",
+                        "moves out of your way", "gets out of your way"]
+        is_pet_interaction = any(p in text_lower for p in pet_patterns)
+
+        # Abort on combat indicators (but not pet-related)
         combat_patterns = ["hits", "misses", "bites", "attacks", "throws", "swings"]
-        if any(p in text.lower() for p in combat_patterns):
+        if any(p in text_lower for p in combat_patterns) and not is_pet_interaction:
             return True
 
         # Abort on significant HP drop (>20% since queue started)
@@ -510,8 +518,13 @@ class BRAIDAgent(BaseAgent):
                 return True
 
         # Abort on danger indicators
-        danger_patterns = ["trap", "cursed", "poisoned", "confused", "blind", "stuck", "paralyzed"]
-        if any(p in text.lower() for p in danger_patterns):
+        danger_patterns = ["cursed", "poisoned", "confused", "blind", "stuck", "paralyzed"]
+        if any(p in text_lower for p in danger_patterns):
+            return True
+
+        # Abort on trap trigger (but not just seeing "trap" in text)
+        trap_triggers = ["trigger a", "fall into", "step on a", "you are caught"]
+        if any(p in text_lower for p in trap_triggers):
             return True
 
         # Cautious mode: abort on any map discovery (new glyphs appearing)
@@ -534,6 +547,82 @@ class BRAIDAgent(BaseAgent):
                     return True
                 # Update snapshot
                 self._last_glyphs = glyphs.copy()
+
+        return False
+
+    def _check_and_replan_for_traps(self, obs: dict[str, Any]) -> bool:
+        """Check if new traps discovered and re-plan exploration if needed.
+
+        Returns True if queue was re-planned, False otherwise.
+        """
+        if not self._action_queue or not self._batch_source:
+            return False
+
+        # Only re-plan for exploration helpers
+        if self._batch_source not in ("explore_room", "explore_corridor"):
+            return False
+
+        raw_obs = obs.get("obs", {})
+        if not isinstance(raw_obs, dict):
+            return False
+
+        glyphs = raw_obs.get("glyphs")
+        if glyphs is None or self._last_glyphs is None:
+            return False
+
+        from nle import nethack
+
+        # Check for newly discovered traps
+        new_traps = []
+        rows, cols = glyphs.shape
+        for row in range(rows):
+            for col in range(cols):
+                glyph = int(glyphs[row, col])
+                old_glyph = int(self._last_glyphs[row, col])
+                # Trap just appeared (wasn't a trap before, is now)
+                if nethack.glyph_is_trap(glyph) and not nethack.glyph_is_trap(old_glyph):
+                    new_traps.append((col, row))
+
+        if not new_traps:
+            return False
+
+        # New trap discovered - re-plan the exploration
+        pos_info = self._extract_position_info(obs)
+        if not pos_info:
+            return False
+
+        pos = (pos_info[0], pos_info[1])
+
+        # Re-plan based on exploration type
+        if self._batch_source == "explore_room":
+            from .compute.navigation import detect_room, plan_room_exploration
+            room = detect_room(glyphs, pos)
+            if room:
+                new_actions = plan_room_exploration(glyphs, room, pos)
+                if new_actions:
+                    self._action_queue = list(new_actions)
+                    self._batch_total = len(new_actions)
+                    self._batch_executed = 0
+                    self.storage.log_error(
+                        self.episode_number, self._step,
+                        f"Re-planned room exploration around {len(new_traps)} new trap(s)"
+                    )
+                    return True
+
+        elif self._batch_source == "explore_corridor":
+            from .compute.navigation import detect_corridor, plan_corridor_exploration
+            corridor = detect_corridor(glyphs, pos)
+            if corridor:
+                new_actions = plan_corridor_exploration(glyphs, corridor, pos)
+                if new_actions:
+                    self._action_queue = list(new_actions)
+                    self._batch_total = len(new_actions)
+                    self._batch_executed = 0
+                    self.storage.log_error(
+                        self.episode_number, self._step,
+                        f"Re-planned corridor exploration around {len(new_traps)} new trap(s)"
+                    )
+                    return True
 
         return False
 

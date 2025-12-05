@@ -520,6 +520,13 @@ def detect_corridor(
     if not (0 <= py < rows and 0 <= px < cols):
         return None
 
+    # First, find ALL visible corridor tiles on the map
+    all_corridor_tiles: set[tuple[int, int]] = set()
+    for row in range(rows):
+        for col in range(cols):
+            if _is_corridor_tile(glyphs, col, row):
+                all_corridor_tiles.add((col, row))
+
     # Player position may not show corridor glyph (player/monster overlay)
     # Seed flood-fill from current or adjacent corridor tiles
     seed_tiles = []
@@ -559,6 +566,20 @@ def detect_corridor(
         # Add all 8 neighbors for corridors
         for dy, dx in DIRS.values():
             queue.append((x + dx, y + dy))
+
+    # Also include any corridor tiles that are connected via known corridor
+    # (handles cases where tiles are diagonally connected through player/monster)
+    changed = True
+    while changed:
+        changed = False
+        for tile in list(all_corridor_tiles - corridor_tiles):
+            x, y = tile
+            # Check if adjacent to any known corridor tile
+            for dy, dx in DIRS.values():
+                if (x + dx, y + dy) in corridor_tiles:
+                    corridor_tiles.add(tile)
+                    changed = True
+                    break
 
     if len(corridor_tiles) < 2:
         return None
@@ -767,7 +788,7 @@ def plan_corridor_exploration(
     1. Find exploration frontiers (corridor tiles adjacent to unexplored)
     2. Find dead-ends (tiles with only 1 walkable neighbor)
     3. Visit frontiers first (prioritize discovery), then dead-ends
-    4. Mark pet/monster positions as walkable for pathfinding
+    4. Mark all corridor tiles + pet/monster positions as walkable for pathfinding
 
     Args:
         glyphs: 2D glyph array from observation
@@ -782,9 +803,14 @@ def plan_corridor_exploration(
 
     corridor_set = set(corridor)
 
-    # Find monsters/pets on corridor - treat as walkable for pathfinding
+    # All corridor tiles should be walkable for pathfinding
+    # (some may have player/monster glyphs overlaying them)
+    extra_walkable = set(corridor_set)
+    extra_walkable.add(pos)
+
+    # Find monsters/pets on corridor - also treat as walkable
     monsters = _find_monsters_on_corridor(glyphs, corridor_set)
-    extra_walkable = {pos} | monsters
+    extra_walkable |= monsters
 
     # Find exploration frontiers (tiles adjacent to unexplored stone)
     frontiers = _find_corridor_frontiers(glyphs, corridor_set)
@@ -814,7 +840,18 @@ def plan_corridor_exploration(
         if t not in targets:
             targets.append(t)
 
-    # If no targets, walk to furthest corridor tile
+    # If no frontiers or dead-ends, walk to all corridor endpoints
+    if not targets:
+        # Find endpoints (tiles with only 1 corridor neighbor)
+        endpoints = [
+            t for t in corridor
+            if sum(1 for dy, dx in DIRS.values() if (t[0] + dx, t[1] + dy) in corridor_set) == 1
+        ]
+        # Sort by distance, furthest first to explore more
+        endpoints.sort(key=lambda t: -distance(pos[0], pos[1], t[0], t[1]))
+        targets = endpoints
+
+    # Still no targets? Just walk to furthest corridor tile
     if not targets and len(corridor) > 1:
         furthest = max(corridor, key=lambda t: distance(pos[0], pos[1], t[0], t[1]))
         targets = [furthest]
