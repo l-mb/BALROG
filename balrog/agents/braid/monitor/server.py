@@ -48,7 +48,12 @@ def create_app(db_path: Path) -> Starlette:
 
         screen = db.get_latest_screen(worker_id, max_step=current_step)
         stats = db.get_stats(worker_id)
-        responses = db.get_recent_responses(worker_id, limit=10, max_step=current_step)
+        current_episode = stats.episode if stats else None
+
+        # Filter responses by current episode to avoid cross-episode confusion
+        responses = db.get_recent_responses(
+            worker_id, limit=10, max_step=current_step, episode=current_episode
+        )
 
         # Memory filters from query params
         scope = request.query_params.get("scope")
@@ -57,14 +62,15 @@ def create_app(db_path: Path) -> Starlette:
         include_deleted = request.query_params.get("deleted") == "1"
 
         # Pass current episode for episode-scoped memory filtering
-        current_episode = stats.episode if stats else None
         entries = db.get_memory_entries(
             limit=50, scope=scope, include_deleted=include_deleted, episode=current_episode
         )
 
-        # Get full prompt and response for debug panel
+        # Get full prompt and response for debug panel (filter by episode)
         full_prompt = db.get_latest_prompt(worker_id, max_step=current_step)
-        full_response = db.get_latest_full_response(worker_id, max_step=current_step)
+        full_response = db.get_latest_full_response(
+            worker_id, max_step=current_step, episode=current_episode
+        )
 
         # Get visited positions for exploration overlay (all visits, not filtered by step)
         visited: set[tuple[int, int]] = set()

@@ -174,62 +174,103 @@ class MonitorDB:
             return {"step": row["step"], "messages": data.get("messages", [])}
         return None
 
-    def get_latest_full_response(self, worker_id: str, max_step: int | None = None) -> dict | None:
-        """Get the latest full LLM response data for an agent (excludes queued actions)."""
-        # Filter out queued actions - need to scan to find actual LLM response
-        if max_step is not None:
-            rows = self.conn.execute(
-                """SELECT step, data FROM journal
+    def get_latest_full_response(
+        self, worker_id: str, max_step: int | None = None, episode: int | None = None
+    ) -> dict | None:
+        """Get the latest full LLM response data for an agent (excludes queued actions).
+
+        If episode is specified, only searches within that episode.
+        Uses SQL filter to exclude queued actions directly.
+        """
+        # Filter out queued actions in SQL - much more reliable than LIMIT + post-filter
+        not_queued = "COALESCE(json_extract(data, '$.action_type'), 'single') != 'queued'"
+        if episode is not None:
+            if max_step is not None:
+                row = self.conn.execute(
+                    f"""SELECT step, data FROM journal
+                       WHERE worker_id = ? AND episode = ? AND event = 'response' AND step <= ?
+                             AND {not_queued}
+                       ORDER BY id DESC LIMIT 1""",
+                    (worker_id, episode, max_step),
+                ).fetchone()
+            else:
+                row = self.conn.execute(
+                    f"""SELECT step, data FROM journal
+                       WHERE worker_id = ? AND episode = ? AND event = 'response'
+                             AND {not_queued}
+                       ORDER BY id DESC LIMIT 1""",
+                    (worker_id, episode),
+                ).fetchone()
+        elif max_step is not None:
+            row = self.conn.execute(
+                f"""SELECT step, data FROM journal
                    WHERE worker_id = ? AND event = 'response' AND step <= ?
-                   ORDER BY id DESC LIMIT 100""",
+                         AND {not_queued}
+                   ORDER BY id DESC LIMIT 1""",
                 (worker_id, max_step),
-            ).fetchall()
+            ).fetchone()
         else:
-            rows = self.conn.execute(
-                """SELECT step, data FROM journal
+            row = self.conn.execute(
+                f"""SELECT step, data FROM journal
                    WHERE worker_id = ? AND event = 'response'
-                   ORDER BY id DESC LIMIT 100""",
+                         AND {not_queued}
+                   ORDER BY id DESC LIMIT 1""",
                 (worker_id,),
-            ).fetchall()
-        for row in rows:
-            if row["data"]:
-                data = json.loads(row["data"])
-                # Skip queued actions - they're internal execution, not LLM decisions
-                if data.get("action_type") == "queued":
-                    continue
-                return {
-                    "step": row["step"],
-                    "action": data.get("action", ""),
-                    "reasoning": data.get("reasoning"),
-                    "extended_thinking": data.get("extended_thinking"),
-                    "latency_ms": data.get("latency_ms", 0),
-                    "in_tok": data.get("in_tok", 0),
-                    "out_tok": data.get("out_tok", 0),
-                    "raw_completion": data.get("raw_completion"),
-                }
+            ).fetchone()
+        if row and row["data"]:
+            data = json.loads(row["data"])
+            return {
+                "step": row["step"],
+                "action": data.get("action", ""),
+                "reasoning": data.get("reasoning"),
+                "extended_thinking": data.get("extended_thinking"),
+                "latency_ms": data.get("latency_ms", 0),
+                "in_tok": data.get("in_tok", 0),
+                "out_tok": data.get("out_tok", 0),
+                "raw_completion": data.get("raw_completion"),
+            }
         return None
 
     def get_recent_responses(
-        self, worker_id: str, limit: int = 10, max_step: int | None = None
+        self, worker_id: str, limit: int = 10, max_step: int | None = None, episode: int | None = None
     ) -> list[dict]:
         """Get recent LLM responses for an agent (newest first), optionally up to a step.
 
         Filters out queued actions (internal execution) - only shows actual LLM decisions.
         Uses SQL filter for efficiency instead of post-filtering.
+        If episode is specified, only searches within that episode.
         """
-        if max_step is not None:
+        base_filter = "COALESCE(json_extract(data, '$.action_type'), 'single') != 'queued'"
+        if episode is not None:
+            if max_step is not None:
+                rows = self.conn.execute(
+                    f"""SELECT step, data FROM journal
+                       WHERE worker_id = ? AND episode = ? AND event = 'response' AND step <= ?
+                             AND {base_filter}
+                       ORDER BY id DESC LIMIT ?""",
+                    (worker_id, episode, max_step, limit),
+                ).fetchall()
+            else:
+                rows = self.conn.execute(
+                    f"""SELECT step, data FROM journal
+                       WHERE worker_id = ? AND episode = ? AND event = 'response'
+                             AND {base_filter}
+                       ORDER BY id DESC LIMIT ?""",
+                    (worker_id, episode, limit),
+                ).fetchall()
+        elif max_step is not None:
             rows = self.conn.execute(
-                """SELECT step, data FROM journal
+                f"""SELECT step, data FROM journal
                    WHERE worker_id = ? AND event = 'response' AND step <= ?
-                         AND COALESCE(json_extract(data, '$.action_type'), 'single') != 'queued'
+                         AND {base_filter}
                    ORDER BY id DESC LIMIT ?""",
                 (worker_id, max_step, limit),
             ).fetchall()
         else:
             rows = self.conn.execute(
-                """SELECT step, data FROM journal
+                f"""SELECT step, data FROM journal
                    WHERE worker_id = ? AND event = 'response'
-                         AND COALESCE(json_extract(data, '$.action_type'), 'single') != 'queued'
+                         AND {base_filter}
                    ORDER BY id DESC LIMIT ?""",
                 (worker_id, limit),
             ).fetchall()
