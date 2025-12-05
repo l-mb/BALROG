@@ -28,6 +28,7 @@ ESSENTIALS:
 - Stairs up from lvl:1 = INSTANT LOSS (unless carrying true Amulet of Yendor)
 - Your pet(s) will only join you on a level change if right next to you
 - You, or something else, might be on top of a dungeon feature that you thus cannot see on the map!
+- You can often travel diagonally to save steps. If not encumbered, even diagonally through only diagonally connected locations.
 
 EXPLORATION PROTOCOL (follow this to avoid wandering):
 1. On entering new area: note position, mark unexplored exits in "frontier" tag
@@ -66,16 +67,23 @@ action2
 <|END|>
 
 OPTION C - Compute helper (PREFERRED for navigation >3 tiles):
-<|COMPUTE|>travel_to: @x,y<|END|>
+<|COMPUTE|>travel_to: @x,y<|END|>       - absolute coordinates
+<|COMPUTE|>travel_to: +dx,dy<|END|>     - relative offset from current position
+<|COMPUTE|>travel: direction N<|END|>   - relative direction + distance
 
-WHEN TO USE travel_to:
-- Returning to known location (stairs, altar, stash)
-- Backtracking to junction after dead-end
-- Moving >3 tiles to a known location
-- ANY time you know the destination coordinates
+TRAVEL EXAMPLES:
+<|COMPUTE|>travel_to: @45,12<|END|>     - go to absolute position (45,12)
+<|COMPUTE|>travel_to: +5,-3<|END|>      - go 5 east, 3 north from here
+<|COMPUTE|>travel: north 5<|END|>       - go 5 tiles north
+<|COMPUTE|>travel: SE 4<|END|>          - go 4 tiles southeast
 
-travel_to auto-pathfinds through explored areas. Saves many turns vs manual movement!
-Example: <|COMPUTE|>travel_to: @45,12<|END|>
+WHEN TO USE:
+- Absolute (@x,y): known landmarks (stairs, altar, stash)
+- Relative (+dx,dy): offset from current position
+- Direction (travel: N 5): simple "go N tiles in direction"
+
+All travel commands auto-pathfind through explored areas. Use for ANY movement >3 tiles!
+AVOID thinking over routes when helpers are available!
 
 SCANNING HELPERS (use to get precise info, coordinates and distance):
 <|COMPUTE|>scan_monsters<|END|>  - list visible monsters: "d@45,12(3) f*@40,8(7)" (* = pet)

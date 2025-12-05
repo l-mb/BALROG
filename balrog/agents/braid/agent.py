@@ -569,20 +569,59 @@ class BRAIDAgent(BaseAgent):
                     results.append("pathfind: PARSE ERROR")
 
             elif request.startswith("travel_to:"):
-                match = re.match(r"travel_to:\s*@(\d+),(\d+)", request)
-                if match:
-                    gx, gy = map(int, match.groups())
-                    path = pathfind(glyphs, pos, (gx, gy))
-                    if path:
-                        # Extend queue rather than overwrite (in case LLM also sent ACTIONS)
-                        self._action_queue.extend(path)
-                        self._queue_start_hp = self._extract_hp(obs)
-                        dirs = " ".join(path)
-                        results.append(f"travel_to: @{gx},{gy} = QUEUED {len(path)} moves ({dirs})")
-                    else:
-                        results.append(f"travel_to: @{gx},{gy} = NO PATH (unexplored/blocked)")
+                # Absolute: travel_to: @45,12
+                # Relative: travel_to: +3,-2 (x+3, y-2 from current position)
+                abs_match = re.match(r"travel_to:\s*@(\d+),(\d+)", request)
+                rel_match = re.match(r"travel_to:\s*([+-]?\d+),([+-]?\d+)", request)
+                if abs_match:
+                    gx, gy = map(int, abs_match.groups())
+                elif rel_match:
+                    dx, dy = map(int, rel_match.groups())
+                    gx, gy = pos[0] + dx, pos[1] + dy
                 else:
-                    results.append("travel_to: PARSE ERROR")
+                    results.append("travel_to: PARSE ERROR (use @x,y or +dx,dy)")
+                    continue
+
+                path = pathfind(glyphs, pos, (gx, gy), extra_walkable={pos})
+                if path:
+                    self._action_queue.extend(path)
+                    self._queue_start_hp = self._extract_hp(obs)
+                    dirs = " ".join(path)
+                    results.append(f"travel_to: @{gx},{gy} = QUEUED {len(path)} moves ({dirs})")
+                else:
+                    results.append(f"travel_to: @{gx},{gy} = NO PATH (unexplored/blocked)")
+
+            elif request.startswith("travel:"):
+                # Direction-based relative travel: travel: north 5, travel: NE 3
+                from .compute.navigation import DIRS
+                dir_match = re.match(
+                    r"travel:\s*(north|south|east|west|northeast|northwest|southeast|southwest|N|S|E|W|NE|NW|SE|SW)\s+(\d+)",
+                    request, re.IGNORECASE
+                )
+                if dir_match:
+                    dir_name, dist_str = dir_match.groups()
+                    dist = int(dist_str)
+                    # Normalize direction name
+                    dir_map = {
+                        "n": "north", "s": "south", "e": "east", "w": "west",
+                        "ne": "northeast", "nw": "northwest", "se": "southeast", "sw": "southwest"
+                    }
+                    dir_name = dir_map.get(dir_name.lower(), dir_name.lower())
+                    if dir_name in DIRS:
+                        dy, dx = DIRS[dir_name]
+                        gx, gy = pos[0] + dx * dist, pos[1] + dy * dist
+                        path = pathfind(glyphs, pos, (gx, gy), extra_walkable={pos})
+                        if path:
+                            self._action_queue.extend(path)
+                            self._queue_start_hp = self._extract_hp(obs)
+                            dirs = " ".join(path)
+                            results.append(f"travel: {dir_name} {dist} -> @{gx},{gy} = QUEUED {len(path)} moves")
+                        else:
+                            results.append(f"travel: {dir_name} {dist} -> @{gx},{gy} = NO PATH")
+                    else:
+                        results.append(f"travel: UNKNOWN DIRECTION '{dir_name}'")
+                else:
+                    results.append("travel: PARSE ERROR (use 'travel: north 5' or 'travel: NE 3')")
 
             elif request.strip() == "scan_monsters":
                 from .compute.navigation import scan_monsters
