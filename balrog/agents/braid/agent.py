@@ -1213,3 +1213,12 @@ class BRAIDAgent(BaseAgent):
         self._recent_actions.clear()
         self._recent_action_outputs.clear()
         self.storage.log_reset(self.episode_number, str(self.config.client.model_id))
+
+    def on_episode_end(self) -> None:
+        """Called when episode ends - close SDK session if active.
+
+        This allows ClaudeSDKWrapper to close its session and start fresh
+        for the next episode, maintaining clean context boundaries.
+        """
+        if hasattr(self.client, "close_session"):
+            self.client.close_session()

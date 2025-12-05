@@ -361,6 +361,10 @@ class Evaluator:
                 pbar.set_postfix_str("DONE")
             pbar.close()
 
+            # Notify agent that episode has ended (allows SDK session cleanup)
+            if hasattr(agent, "on_episode_end"):
+                agent.on_episode_end()
+
             episode_log["episode_return"] = episode_return
             episode_log["num_steps"] = step + 1
             episode_log["failed_candidates"] = env.failed_candidates

@@ -141,6 +141,7 @@ NETHACK ESSENTIALS:
 - HP < 30%: retreat toward stairs_up.
 - Descend when level fully explored.
 - Pets detect mimics; keep pet nearby. Pet only follows if adjacent when using stairs.
+- Gold is automatically picked up when moving over the tiles.
 - Stairs up from Dlvl:1 = INSTANT LOSS.
 - Monsters, items, your own glyph may overlay and thus hide dungeon features (stairs, altar, etc).
 - Diagonal movement often saves steps.

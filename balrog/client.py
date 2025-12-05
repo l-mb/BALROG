@@ -564,6 +564,159 @@ class ClaudeWrapper(LLMClientWrapper):
         )
 
 
+class ClaudeSDKWrapper(LLMClientWrapper):
+    """Wrapper using Claude Agent SDK for session-based interactions.
+
+    Maintains a persistent session across generate() calls within an episode.
+    Only sends new observations each turn - SDK maintains conversation history.
+    Use client_name='claude-sdk' to enable.
+    """
+
+    def __init__(self, client_config):
+        """Initialize the ClaudeSDKWrapper with the given configuration."""
+        super().__init__(client_config)
+        import asyncio
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._client = None  # ClaudeSDKClient instance
+        self._turn_count = 0
+        self._system_prompt: str | None = None
+        self._system_refresh_interval = 25  # Re-inject system prompt every N turns
+
+    def _ensure_loop(self):
+        """Create event loop if needed."""
+        import asyncio
+        if self._loop is None:
+            self._loop = asyncio.new_event_loop()
+
+    def _initialize_session(self, system_prompt: str):
+        """Start new SDK session with system prompt."""
+        self._ensure_loop()
+        self._system_prompt = system_prompt
+        self._turn_count = 0
+
+        # Get thinking budget from client kwargs
+        thinking_budget = self.client_kwargs.get("thinking_budget", 0)
+
+        async def _connect():
+            from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
+
+            options_kwargs = {
+                "system_prompt": system_prompt,
+                "model": self.model_id,
+                "max_turns": None,  # We control turn-by-turn externally
+            }
+
+            # Add thinking tokens if specified
+            if thinking_budget and thinking_budget > 0:
+                options_kwargs["max_thinking_tokens"] = thinking_budget
+
+            options = ClaudeAgentOptions(**options_kwargs)
+            self._client = ClaudeSDKClient(options)
+            await self._client.connect()
+            logger.info(f"ClaudeSDK connected: model={self.model_id}, thinking={thinking_budget}")
+
+        try:
+            self._loop.run_until_complete(_connect())
+            logger.info(f"ClaudeSDK session initialized for model {self.model_id}")
+        except Exception as e:
+            logger.error(f"ClaudeSDK session init failed: {type(e).__name__}: {e}")
+            raise
+
+    def close_session(self):
+        """Close current session (call at episode end)."""
+        if self._client and self._loop:
+            async def _disconnect():
+                await self._client.disconnect()
+            try:
+                self._loop.run_until_complete(_disconnect())
+            except Exception as e:
+                logger.warning(f"Error closing SDK session: {e}")
+            self._client = None
+        self._turn_count = 0
+        logger.info("ClaudeSDK session closed")
+
+    def generate(self, messages) -> LLMResponse:
+        """Generate response using SDK session.
+
+        Only sends the latest user message - SDK maintains conversation history.
+        System prompt is sent at session start and refreshed periodically.
+        """
+        # Extract system prompt from first message if present
+        system_prompt = None
+        user_messages = messages
+        if messages and messages[0].role == "system":
+            system_prompt = messages[0].content
+            user_messages = messages[1:]
+
+        # Initialize session if needed
+        if self._client is None:
+            if system_prompt:
+                self._initialize_session(system_prompt)
+            else:
+                # No system prompt - initialize with empty
+                self._initialize_session("")
+
+        # Periodic system prompt refresh
+        self._turn_count += 1
+        needs_refresh = (self._turn_count % self._system_refresh_interval == 0)
+
+        # Get only the latest user message (new observation)
+        # SDK maintains conversation history
+        latest_content = user_messages[-1].content if user_messages else ""
+
+        if needs_refresh and self._system_prompt:
+            latest_content = f"[CONTEXT REFRESH - Remember these instructions]\n{self._system_prompt}\n\n[Current observation]\n{latest_content}"
+            logger.debug(f"Refreshing system prompt at turn {self._turn_count}")
+
+        self._ensure_loop()
+
+        async def _send_and_receive(content: str):
+            """Send query and receive full response."""
+            from claude_agent_sdk.types import AssistantMessage, ResultMessage
+
+            response_text = ""
+            input_tokens = 0
+            output_tokens = 0
+
+            # First, send the query
+            await self._client.query(content)
+
+            # Then, receive the response
+            async for msg in self._client.receive_response():
+                if isinstance(msg, AssistantMessage):
+                    for block in msg.content:
+                        if hasattr(block, "text"):
+                            response_text += block.text
+                elif isinstance(msg, ResultMessage):
+                    # Extract usage from result
+                    if msg.usage:
+                        input_tokens = msg.usage.get("input_tokens", 0) or 0
+                        output_tokens = msg.usage.get("output_tokens", 0) or 0
+
+            return response_text, input_tokens, output_tokens
+
+        def api_call():
+            # Create fresh coroutine each retry attempt
+            try:
+                return self._loop.run_until_complete(_send_and_receive(latest_content))
+            except Exception as e:
+                logger.error(f"ClaudeSDK error: {type(e).__name__}: {e}")
+                raise
+
+        completion, in_tok, out_tok = self.execute_with_retries(api_call)
+
+        logger.info(f"ClaudeSDK usage: in={in_tok}, out={out_tok}, turn={self._turn_count}")
+
+        return LLMResponse(
+            model_id=self.model_id,
+            completion=completion.strip(),
+            stop_reason="end_turn",
+            input_tokens=in_tok,
+            output_tokens=out_tok,
+            reasoning=None,
+        )
+
+
 def create_llm_client(client_config):
     """
     Factory function to create the appropriate LLM client based on the client name.
@@ -573,6 +726,12 @@ def create_llm_client(client_config):
 
     Returns:
         callable: A factory function that returns an instance of the appropriate LLM client.
+
+    Supported client names:
+        - openai, vllm, nvidia, xai: OpenAI-compatible API
+        - gemini: Google Generative AI
+        - claude: Direct Anthropic Messages API (stateless, uses prompt caching)
+        - claude-sdk: Claude Agent SDK (session-based, maintains context)
     """
 
     def client_factory():
@@ -582,7 +741,11 @@ def create_llm_client(client_config):
             return OpenAIWrapper(client_config)
         elif "gemini" in client_name_lower:
             return GoogleGenerativeAIWrapper(client_config)
+        elif client_name_lower == "claude-sdk":
+            # Session-based SDK client - must match exactly
+            return ClaudeSDKWrapper(client_config)
         elif "claude" in client_name_lower:
+            # Direct API client (default for "claude", "claude-haiku", etc.)
             return ClaudeWrapper(client_config)
         else:
             raise ValueError(f"Unsupported client name: {client_config.client_name}")

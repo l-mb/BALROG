@@ -56,6 +56,9 @@ setup(
             "uvicorn",
             "jinja2",
         ],
+        "claude-sdk": [
+            "claude-agent-sdk>=0.1.0",
+        ],
     },
     package_dir={"": "./"},
     packages=setuptools.find_packages(where="./", include=["balrog*"]),
