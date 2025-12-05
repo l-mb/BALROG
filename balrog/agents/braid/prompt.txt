@@ -149,7 +149,7 @@ NETHACK ESSENTIALS:
 - Descend when level fully explored.
 - As soon as stairs down found, descend once and ascend immediately again, to lock in lower danger level
 - Pets detect mimics; keep pet nearby. Pet only follows if adjacent when using stairs.
-- Gold is automatically picked up when moving over the tiles.
+- Gold, scrolls, potions, wands are AUTOMATICALLY picked up when moving over them.
 - Stairs up from Dlvl:1 = INSTANT LOSS.
 - Monsters, items, your own glyph MAY hide dungeon features (stairs, altar, etc). Check if not found otherwise.
 - Diagonal movement often saves steps.
