@@ -942,7 +942,32 @@ def plan_corridor_exploration(
         actions = plan_visited_aware_exploration(glyphs, corridor_set, pos, visited)
         if actions:
             return actions
-        # All corridor tiles visited - fall through for dead-end searches
+        # All visible corridor tiles visited - check for frontiers to expand into
+
+    # Find exploration frontiers (tiles adjacent to unexplored stone)
+    frontiers = _find_corridor_frontiers(glyphs, corridor_set)
+
+    # If all visible tiles visited but frontiers exist, walk toward frontier and continue
+    # This reveals more corridor tiles that weren't visible before
+    if visited and frontiers:
+        # Find frontier tile furthest from rooms (most likely to lead somewhere new)
+        frontier_tiles = [(x, y) for x, y, dirs in frontiers]
+
+        # Pick frontier furthest from current position (explore outward)
+        if frontier_tiles:
+            target = max(frontier_tiles, key=lambda t: distance(pos[0], pos[1], t[0], t[1]))
+            path = pathfind(glyphs, pos, target, extra_walkable | visited)
+            if path:
+                actions = list(path)
+                # Get the direction(s) this frontier leads to unexplored area
+                for fx, fy, dirs in frontiers:
+                    if (fx, fy) == target and dirs:
+                        # Continue in the first unexplored direction to reveal more
+                        first_dir = dirs.split(",")[0].strip()
+                        actions.extend([first_dir] * 3)  # Try 3 steps to reveal
+                        actions.append("search")
+                        break
+                return actions
 
     # Find tiles adjacent to rooms (floor tiles) - we want to explore AWAY from these
     room_adjacent_tiles: set[tuple[int, int]] = set()
@@ -954,9 +979,6 @@ def plan_corridor_exploration(
                 if cmap_idx in FLOOR_CMAP:
                     room_adjacent_tiles.add((x, y))
                     break
-
-    # Find exploration frontiers (tiles adjacent to unexplored stone)
-    frontiers = _find_corridor_frontiers(glyphs, corridor_set)
 
     # Find dead-ends using improved neighbor counting (includes doors/floors)
     dead_ends = [

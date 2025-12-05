@@ -102,8 +102,9 @@
 }
 
 .col-action {
-    width: 100px;
+    width: auto;
     word-break: break-word;
+    max-height: 1rem;
 }
 
 .col-action code {
@@ -121,7 +122,8 @@
 }
 
 .col-reasoning {
-    width: auto;
+    width: 200px;
+    max-height: 1rem;
 }
 
 .col-reasoning pre {
@@ -131,7 +133,7 @@
     background: var(--pico-card-sectioning-background-color);
     white-space: pre-wrap;
     word-break: break-word;
-    max-height: 3rem;
+    max-height: 1rem;
     overflow-y: auto;
 }
 
