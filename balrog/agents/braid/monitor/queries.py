@@ -35,6 +35,8 @@ class AgentStats:
     think_count: int
     # Compute helper stats
     compute_count: int  # Number of responses with compute requests
+    # LLM call tracking
+    llm_calls: int  # Total LLM API calls made
 
 
 @dataclass
@@ -249,7 +251,8 @@ class MonitorDB:
                       SUM(CASE WHEN json_extract(data, '$.action_type') = 'multi' THEN 1 ELSE 0 END) as multi_ct,
                       SUM(CASE WHEN json_extract(data, '$.action_type') = 'queued' THEN 1 ELSE 0 END) as queued_ct,
                       SUM(CASE WHEN json_extract(data, '$.reasoning') IS NOT NULL THEN 1 ELSE 0 END) as think_ct,
-                      SUM(CASE WHEN json_extract(data, '$.compute_requests') IS NOT NULL THEN 1 ELSE 0 END) as compute_ct
+                      SUM(CASE WHEN json_extract(data, '$.compute_requests') IS NOT NULL THEN 1 ELSE 0 END) as compute_ct,
+                      MAX(json_extract(data, '$.total_llm_calls')) as llm_calls
                FROM journal WHERE worker_id = ? AND event = 'response'""",
             (worker_id,),
         ).fetchone()
@@ -288,6 +291,7 @@ class MonitorDB:
             persistent_mem_removes=int(mem["p_removes"] or 0),
             think_count=int(resp["think_ct"] or 0),
             compute_count=int(resp["compute_ct"] or 0),
+            llm_calls=int(resp["llm_calls"] or 0),
         )
 
     def get_memory_entries(

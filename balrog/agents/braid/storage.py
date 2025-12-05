@@ -315,6 +315,8 @@ class BraidStorage:
         action_type: str = "single",  # "single", "multi", or "queued"
         compute_requests: list[str] | None = None,
         raw_completion: str | None = None,
+        ep_llm_calls: int = 0,
+        total_llm_calls: int = 0,
     ) -> None:
         data: dict[str, Any] = {
             "action": action,
@@ -326,6 +328,8 @@ class BraidStorage:
             "ep_out_tok": ep_output_tokens,
             "total_in_tok": total_input_tokens,
             "total_out_tok": total_output_tokens,
+            "ep_llm_calls": ep_llm_calls,
+            "total_llm_calls": total_llm_calls,
         }
         if reasoning:
             data["reasoning"] = reasoning

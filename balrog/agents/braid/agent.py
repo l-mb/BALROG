@@ -63,6 +63,8 @@ class BRAIDAgent(BaseAgent):
         self._cumulative_output_tokens = 0
         self._episode_input_tokens = 0
         self._episode_output_tokens = 0
+        self._cumulative_llm_calls = 0
+        self._episode_llm_calls = 0
 
         # Track memory update counts and details
         self._mem_adds = 0
@@ -171,6 +173,8 @@ class BRAIDAgent(BaseAgent):
                     cache_creation_tokens=0,
                     cache_read_tokens=0,
                     action_type="queued",
+                    ep_llm_calls=self._episode_llm_calls,
+                    total_llm_calls=self._cumulative_llm_calls,
                 )
                 return action_response
 
@@ -199,6 +203,8 @@ class BRAIDAgent(BaseAgent):
             self.episode_number, self._step, len(messages), prompt_chars, obs_text, full_prompt
         )
 
+        self._cumulative_llm_calls += 1
+        self._episode_llm_calls += 1
         response = self.client.generate(messages)
         parsed = self._parse_response(response)
 
@@ -372,6 +378,8 @@ class BRAIDAgent(BaseAgent):
             action_type="multi" if len(actions) > 1 else "single",
             compute_requests=self._pending_compute if self._pending_compute else None,
             raw_completion=completion,
+            ep_llm_calls=self._episode_llm_calls,
+            total_llm_calls=self._cumulative_llm_calls,
         )
 
         # Store extended thinking for next turn if enabled
@@ -897,6 +905,7 @@ class BRAIDAgent(BaseAgent):
         self._enabled_tags = None
         self._episode_input_tokens = 0
         self._episode_output_tokens = 0
+        self._episode_llm_calls = 0
         self._action_queue.clear()
         self._queue_start_hp = None
         self._cautious_mode = False
