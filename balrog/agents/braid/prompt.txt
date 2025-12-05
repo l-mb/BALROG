@@ -47,7 +47,7 @@ RESPONSE FORMAT (all parts in single response):
 1. Optional: <think>terse analysis</think>
 2. Optional memory updates:
 <memory_updates>
-add: [{"scope": "episode", "tags": "pos", "prio": 9, "content": "@5,3 L1"}]
+add: [{"scope": "episode|persistent", "tags": "tag1,tag2,tag3,...", "prio": 9, "content": "..."}]
 remove: ["abc123"]
 enable_tags: ["lvl:2"]
 disable_tags: ["lvl:1"]
@@ -71,31 +71,31 @@ OPTION C - Compute helper (PREFERRED for navigation >3 tiles):
 WHEN TO USE travel_to:
 - Returning to known location (stairs, altar, stash)
 - Backtracking to junction after dead-end
-- Moving >3 tiles to a specific coordinate
+- Moving >3 tiles to a known location
 - ANY time you know the destination coordinates
 
 travel_to auto-pathfinds through explored areas. Saves many turns vs manual movement!
 Example: <|COMPUTE|>travel_to: @45,12<|END|>
 
-SCANNING HELPERS (use to get precise info):
-<|COMPUTE|>scan_monsters<|END|>  - list visible monsters: "d@45,12(3) G*@40,8(7)" (* = pet)
+SCANNING HELPERS (use to get precise info, coordinates and distance):
+<|COMPUTE|>scan_monsters<|END|>  - list visible monsters: "d@45,12(3) f*@40,8(7)" (* = pet)
 <|COMPUTE|>scan_items<|END|>     - list visible items: ")@44,10(2) [@42,11(5)"
 <|COMPUTE|>unexplored<|END|>     - find known exploration frontiers: "@44,5(N,3) @50,12(E,7)"
 <|COMPUTE|>exits<|END|>          - find visible room exits: "N@45,5(door,3) E@52,10(corr,8)"
 
-EXPLORATION HELPERS (autonomous exploration - saves many LLM calls!):
+EXPLORATION HELPERS (autonomous exploration - saves many LLM calls, very efficient!):
 <|COMPUTE|>explore_room<|END|>           - walk room perimeter, search walls. QUEUED N actions
 <|COMPUTE|>explore_room:cautious<|END|>  - same, but abort on ANY discovery (door/passage found)
 <|COMPUTE|>explore_corridor<|END|>       - walk corridor ends, search 3x at each. QUEUED N actions
 <|COMPUTE|>explore_corridor:cautious<|END|>
 
 USE explore_* when:
-- Entering a new room: use explore_room to systematically search walls for secrets
+- Entering a new room, exploring room: use explore_room to systematically search walls for secrets
 - In a corridor: use explore_corridor to explore, search dead-ends
 - Default mode (thorough) only aborts on combat/HP drop
-- Cautious mode aborts if any new tile is revealed (found secret door/passage)
-- PREFER to step-by-step instructions
-- LEARN how to use them
+- Cautious mode aborts immediately if any new tile is revealed (found secret door/passage)
+- PREFER over step-by-step instructions
+- LEARN how to use them, make notes to yourself
 
 Example workflow:
 1. Enter room -> <|COMPUTE|>explore_room<|END|>
@@ -202,29 +202,25 @@ After EVERY action:
 1. Check game message - what happened?
 2. Log outcome: add actlog entry
 3. If blocked: add to "blocked" tag with position+direction
-4. Update "pos" tag
 
 Before EVERY move:
 1. Check "blocked" tag for current position + intended direction
 2. Check "frontier" for unexplored options
 3. Do NOT repeat recently failed moves - this wastes turns!
 
-PLAN/TODO (tag: "plan", prio: varies):
+PLAN/TODO (tag: "plan", prio: 9):
   Track current goal and steps. ONE active plan at a time.
   Format: "GOAL:{goal} NEXT:{next_step} STEPS:{remaining}"
   Examples:
     "GOAL:explore_L1 NEXT:go_N_corridor STEPS:search_deadends,find_stairs"
     "GOAL:kill_monster NEXT:approach STEPS:attack,loot"
     "GOAL:open_door@5,3 NEXT:kick_east STEPS:-"
-  Update after completing steps. Remove when goal done.
-  Revise plan as necessary.
-  Can split into multiple memory entries.
-  FOLLOW THE PLAN.
-  If no plan, you MUST think and make a multi-step plan.
+  Update after completing steps.
+  Remove when goal done.
   If interrupted (combat, item), note current plan before handling interrupt.
 
-GAME RULES (tag: "rule", scope: PERSISTENT, prio: 8):
-  When you discover a game mechanic, constraint, how to use certain ambiguous commands, or rule, store PERMANENTLY.
+GAME & ENVIRONMENT RULES (tag: "rule", scope: PERSISTENT, prio: 8):
+  When you discover a game mechanic, constraint, working strategy, clarification for commands, resolution of perceived discrepancy, or rule, store PERMANENTLY for future use.
   These survive across episodes and help future runs.
   Format: "{category}: {description}"
   Examples:
@@ -232,12 +228,18 @@ GAME RULES (tag: "rule", scope: PERSISTENT, prio: 8):
     "rings: ring of conflict makes all monsters fight each other, including pets"
     "polymorph: wielded cockatrice corpse doesn't stone you while polymorphed"
 
-  After failed or unexpected actions, ask yourself:
+  After failed or unexpected actions, ask yourself and think:
   "Is this a GENERAL game rule I should remember forever, or just a local situation?"
   If general -> add as persistent with tag "rule"
+  If unsure -> add as an episode tag "rule" first, promote if confirmed
+  If you had to think about it once, it's worth saving the conclusion!
 
 None of your thinking, reply, or memory needs to be readable by or meaningful to a human. Encode as much information as possible, however best. Language entirely at your discretion, but you MUST maintain response structure.
 
-You MUST end with exactly ONE of: <|ACTION|>...<|END|> OR <|ACTIONS|>...<|END|> OR <|COMPUTE|>...<|END|>
+PREFER efficient multiple actions, compound actions, and compute helpers to single commands.
 
-PREFER efficient methods so you can focus on strategy and tactics.
+IF you have a plan: follow the plan consistently to completion.
+
+IF you do NOT have a plan: you MUST think and make a DETAILED plan. You can "wait" a turn if you need more steps to refine.
+
+You MUST end with exactly ONE of: <|ACTION|>...<|END|> OR <|ACTIONS|>...<|END|> OR <|COMPUTE|>...<|END|>
