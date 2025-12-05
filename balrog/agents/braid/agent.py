@@ -196,6 +196,39 @@ class BRAIDAgent(BaseAgent):
                 )
                 return action_response
 
+        # Queue empty but batch in progress - check for auto-continuation
+        if self._batch_source in ("explore_room", "explore_corridor"):
+            if self._auto_continue_exploration(obs):
+                # Queue was refilled, process from queue
+                self._step += 1
+                if pos_info:
+                    x, y, dlvl = pos_info
+                    self.storage.log_position(self.episode_number, self._step, dlvl, x, y)
+                action_response = self._pop_queued_action()
+                self.storage.log_response(
+                    episode=self.episode_number,
+                    step=self._step,
+                    action=action_response.completion,
+                    latency_ms=0,
+                    input_tokens=0,
+                    output_tokens=0,
+                    ep_input_tokens=self._episode_input_tokens,
+                    ep_output_tokens=self._episode_output_tokens,
+                    total_input_tokens=self._cumulative_input_tokens,
+                    total_output_tokens=self._cumulative_output_tokens,
+                    reasoning=action_response.reasoning,
+                    cache_creation_tokens=0,
+                    cache_read_tokens=0,
+                    action_type="queued",
+                    ep_llm_calls=self._episode_llm_calls,
+                    total_llm_calls=self._cumulative_llm_calls,
+                )
+                return action_response
+            else:
+                # Exploration complete, record batch summary
+                self._record_batch_summary(completed=True)
+                self._clear_batch_state()
+
         self.prompt_builder.update_observation(obs)
         messages = self.prompt_builder.get_prompt()
 
@@ -976,7 +1009,8 @@ class BRAIDAgent(BaseAgent):
         # Record batch summary and clear state when exhausted
         if not self._action_queue:
             self._record_batch_summary(completed=True)
-            self._clear_batch_state()
+            # Note: Don't clear batch state yet - _auto_continue_exploration may refill queue
+            # The state will be cleared in act() after checking for continuation
 
         return LLMResponse(
             model_id="queued",
@@ -986,6 +1020,66 @@ class BRAIDAgent(BaseAgent):
             output_tokens=0,
             reasoning=f"[Queued: {remaining} remaining]",
         )
+
+    def _auto_continue_exploration(self, obs: dict[str, Any]) -> bool:
+        """Check if exploration should auto-continue after queue empties.
+
+        When explore_room or explore_corridor completes, new tiles may have
+        become visible. Re-plan and continue if there's more to explore.
+
+        Returns True if queue was refilled, False otherwise.
+        """
+        if self._action_queue:  # Queue not empty
+            return False
+
+        if self._batch_source not in ("explore_room", "explore_corridor"):
+            return False
+
+        # Get current observation data
+        raw_obs = obs.get("obs", {})
+        if not isinstance(raw_obs, dict):
+            return False
+
+        glyphs = raw_obs.get("glyphs")
+        blstats = raw_obs.get("blstats")
+        if glyphs is None or blstats is None:
+            return False
+
+        from .compute.navigation import (
+            detect_corridor,
+            detect_room,
+            get_position,
+            plan_corridor_exploration,
+            plan_room_exploration,
+        )
+
+        pos = get_position(blstats)
+        dlvl = int(blstats[12])
+        visited = self.storage.get_visited_for_level(self.episode_number, dlvl)
+
+        new_actions: list[str] = []
+
+        if self._batch_source == "explore_room":
+            room = detect_room(glyphs, pos)
+            if room:
+                new_actions = plan_room_exploration(glyphs, room, pos, visited=visited)
+
+        elif self._batch_source == "explore_corridor":
+            corridor = detect_corridor(glyphs, pos)
+            if corridor:
+                new_actions = plan_corridor_exploration(glyphs, corridor, pos, visited=visited)
+
+        if new_actions:
+            self._action_queue = list(new_actions)
+            self._batch_total += len(new_actions)
+            # Don't reset _batch_executed - keep cumulative count
+            self.storage.log_error(
+                self.episode_number, self._step,
+                f"Auto-continuing {self._batch_source}: {len(new_actions)} more actions"
+            )
+            return True
+
+        return False
 
     def _process_memory_updates(self, mem_text: str) -> None:
         """Parse and apply memory updates from LLM response."""

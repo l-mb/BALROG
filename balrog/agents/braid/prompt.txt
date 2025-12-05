@@ -119,7 +119,7 @@ Use enable_tags/disable_tags to filter. Max 256 chars per entry. Remove stale en
 
 SAVE AS PERSISTENT RULE when:
 - Game mechanic surprises you
-- You discover a clarification on how to use an action, helper
+- You discover a clarification, limitation of how to use an action, helper
 - Strategy works or fails consistently
 - Discover monster/item property
 - When not yet sure about long-term value, save as "episode" rule first, promote later

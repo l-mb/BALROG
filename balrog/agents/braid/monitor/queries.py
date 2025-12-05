@@ -175,33 +175,38 @@ class MonitorDB:
         return None
 
     def get_latest_full_response(self, worker_id: str, max_step: int | None = None) -> dict | None:
-        """Get the latest full response data for an agent."""
+        """Get the latest full LLM response data for an agent (excludes queued actions)."""
+        # Filter out queued actions - need to scan to find actual LLM response
         if max_step is not None:
-            row = self.conn.execute(
+            rows = self.conn.execute(
                 """SELECT step, data FROM journal
                    WHERE worker_id = ? AND event = 'response' AND step <= ?
-                   ORDER BY id DESC LIMIT 1""",
+                   ORDER BY id DESC LIMIT 100""",
                 (worker_id, max_step),
-            ).fetchone()
+            ).fetchall()
         else:
-            row = self.conn.execute(
+            rows = self.conn.execute(
                 """SELECT step, data FROM journal
                    WHERE worker_id = ? AND event = 'response'
-                   ORDER BY id DESC LIMIT 1""",
+                   ORDER BY id DESC LIMIT 100""",
                 (worker_id,),
-            ).fetchone()
-        if row and row["data"]:
-            data = json.loads(row["data"])
-            return {
-                "step": row["step"],
-                "action": data.get("action", ""),
-                "reasoning": data.get("reasoning"),
-                "extended_thinking": data.get("extended_thinking"),
-                "latency_ms": data.get("latency_ms", 0),
-                "in_tok": data.get("in_tok", 0),
-                "out_tok": data.get("out_tok", 0),
-                "raw_completion": data.get("raw_completion"),
-            }
+            ).fetchall()
+        for row in rows:
+            if row["data"]:
+                data = json.loads(row["data"])
+                # Skip queued actions - they're internal execution, not LLM decisions
+                if data.get("action_type") == "queued":
+                    continue
+                return {
+                    "step": row["step"],
+                    "action": data.get("action", ""),
+                    "reasoning": data.get("reasoning"),
+                    "extended_thinking": data.get("extended_thinking"),
+                    "latency_ms": data.get("latency_ms", 0),
+                    "in_tok": data.get("in_tok", 0),
+                    "out_tok": data.get("out_tok", 0),
+                    "raw_completion": data.get("raw_completion"),
+                }
         return None
 
     def get_recent_responses(
@@ -210,32 +215,28 @@ class MonitorDB:
         """Get recent LLM responses for an agent (newest first), optionally up to a step.
 
         Filters out queued actions (internal execution) - only shows actual LLM decisions.
+        Uses SQL filter for efficiency instead of post-filtering.
         """
-        # Fetch extra rows since we filter out queued actions
-        fetch_limit = limit * 20
         if max_step is not None:
             rows = self.conn.execute(
                 """SELECT step, data FROM journal
                    WHERE worker_id = ? AND event = 'response' AND step <= ?
+                         AND COALESCE(json_extract(data, '$.action_type'), 'single') != 'queued'
                    ORDER BY id DESC LIMIT ?""",
-                (worker_id, max_step, fetch_limit),
+                (worker_id, max_step, limit),
             ).fetchall()
         else:
             rows = self.conn.execute(
                 """SELECT step, data FROM journal
                    WHERE worker_id = ? AND event = 'response'
+                         AND COALESCE(json_extract(data, '$.action_type'), 'single') != 'queued'
                    ORDER BY id DESC LIMIT ?""",
-                (worker_id, fetch_limit),
+                (worker_id, limit),
             ).fetchall()
         responses: list[dict[str, object]] = []
         for row in rows:
-            if len(responses) >= limit:
-                break
             if row["data"]:
                 data = json.loads(row["data"])
-                # Skip queued actions - they're internal execution, not LLM decisions
-                if data.get("action_type") == "queued":
-                    continue
                 raw_completion = data.get("raw_completion")
                 original_cmd = _extract_original_command(raw_completion)
                 responses.append({

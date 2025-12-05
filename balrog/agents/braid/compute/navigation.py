@@ -725,8 +725,16 @@ def plan_visited_aware_exploration(
     extra_walkable = visited | walkable_tiles | {pos}
 
     # Also add monster/pet positions as walkable (can swap places)
+    # Check both within walkable_tiles AND adjacent to them (pet might be blocking path)
     rows, cols = glyphs.shape
+    tiles_to_check = set(walkable_tiles)
     for x, y in walkable_tiles:
+        for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+            nx, ny = x + dx, y + dy
+            if 0 <= ny < rows and 0 <= nx < cols:
+                tiles_to_check.add((nx, ny))
+
+    for x, y in tiles_to_check:
         if 0 <= y < rows and 0 <= x < cols:
             glyph = int(glyphs[y, x])
             if nethack.glyph_is_monster(glyph) or nethack.glyph_is_pet(glyph):
@@ -763,6 +771,36 @@ def plan_visited_aware_exploration(
     return actions
 
 
+def _find_room_frontiers(
+    glyphs: np.ndarray, room_tiles: set[tuple[int, int]]
+) -> list[tuple[int, int, str]]:
+    """Find room tiles adjacent to unexplored stone (potential room continuation).
+
+    Also considers tiles adjacent to darkness (space glyph) as frontiers,
+    since dark rooms may extend beyond visible area.
+
+    Returns list of (x, y, directions) where directions indicates unexplored neighbors.
+    """
+    rows, cols = glyphs.shape
+    frontiers = []
+
+    # S_STONE = 0 (unexplored), but also check for darkness (space character)
+    # In dark rooms, unexplored areas show as space (glyph 32 or similar)
+    for x, y in room_tiles:
+        unexplored_dirs = []
+        for dir_name, (dy, dx) in DIRS.items():
+            nx, ny = x + dx, y + dy
+            if 0 <= ny < rows and 0 <= nx < cols:
+                glyph = glyphs[ny, nx]
+                # Stone (unexplored) or space (dark/unexplored)
+                if glyph == S_STONE or glyph == CMAP_OFF + 0:  # S_STONE
+                    unexplored_dirs.append(dir_name[0])  # First letter
+        if unexplored_dirs:
+            frontiers.append((x, y, "".join(sorted(set(unexplored_dirs)))))
+
+    return frontiers
+
+
 def plan_room_exploration(
     glyphs: np.ndarray,
     room_tiles: set[tuple[int, int]],
@@ -783,20 +821,6 @@ def plan_room_exploration(
     Returns:
         List of actions (directions + "search")
     """
-    # Use visited-aware exploration if visited data available
-    if visited:
-        actions = plan_visited_aware_exploration(glyphs, room_tiles, pos, visited)
-        if actions:
-            return actions
-        # All tiles visited - fall through to perimeter search
-
-    # Fallback: perimeter walk (when no visited data or all tiles visited)
-    perimeter = _find_perimeter(room_tiles)
-    if not perimeter:
-        return []
-
-    ordered = _order_perimeter(perimeter, pos)
-
     # Find tiles with items/monsters that need to be walkable for pathfinding
     extra_walkable = {pos}
     rows, cols = glyphs.shape
@@ -805,6 +829,70 @@ def plan_room_exploration(
             glyph = int(glyphs[y, x])
             if nethack.glyph_is_object(glyph) or nethack.glyph_is_monster(glyph) or nethack.glyph_is_pet(glyph):
                 extra_walkable.add((x, y))
+
+    # Use visited-aware exploration if visited data available
+    if visited:
+        actions = plan_visited_aware_exploration(glyphs, room_tiles, pos, visited)
+        if actions:
+            return actions
+        # All visible tiles visited - check for frontiers to expand into
+
+        # Find room frontiers (tiles adjacent to unexplored stone)
+        frontiers = _find_room_frontiers(glyphs, room_tiles)
+        if frontiers:
+            # Pick frontier furthest from current position (explore outward)
+            frontier_tiles = [(x, y) for x, y, _ in frontiers]
+            target = max(frontier_tiles, key=lambda t: distance(pos[0], pos[1], t[0], t[1]))
+            path = pathfind(glyphs, pos, target, extra_walkable | visited)
+            if path:
+                actions = list(path)
+                # Get the direction(s) this frontier leads to unexplored area
+                for fx, fy, dirs in frontiers:
+                    if (fx, fy) == target and dirs:
+                        # Continue in the first unexplored direction to reveal more
+                        dir_map = {"n": "north", "s": "south", "e": "east", "w": "west"}
+                        first_dir = dirs[0].lower()
+                        if first_dir in dir_map:
+                            actions.extend([dir_map[first_dir]] * 3)
+                            actions.append("search")
+                        break
+                return actions
+
+        # Dark room detection: small visible area might mean more room exists
+        # If room is small and no frontiers, try walking to furthest unvisited perimeter tile
+        if len(room_tiles) <= 15:  # Small visible area suggests dark room
+            perimeter = set(_find_perimeter(room_tiles))
+            unvisited_perimeter = perimeter - visited
+            if unvisited_perimeter:
+                # Walk to furthest unvisited perimeter tile
+                target = max(unvisited_perimeter, key=lambda t: distance(pos[0], pos[1], t[0], t[1]))
+                path = pathfind(glyphs, pos, target, extra_walkable | visited | room_tiles)
+                if path:
+                    actions = list(path)
+                    actions.append("search")
+                    return actions
+            else:
+                # All perimeter visited - try walking in each cardinal direction to reveal more
+                # Pick direction toward furthest wall from current position
+                perimeter_list = list(perimeter)
+                if perimeter_list:
+                    furthest = max(perimeter_list, key=lambda t: distance(pos[0], pos[1], t[0], t[1]))
+                    dx = furthest[0] - pos[0]
+                    dy = furthest[1] - pos[1]
+                    # Determine primary direction
+                    if abs(dx) > abs(dy):
+                        dir_name = "east" if dx > 0 else "west"
+                    else:
+                        dir_name = "south" if dy > 0 else "north"
+                    # Try walking that direction to reveal more room
+                    return [dir_name, dir_name, "search"]
+
+    # Fallback: perimeter walk (when no visited data or all tiles visited)
+    perimeter_list = _find_perimeter(room_tiles)
+    if not perimeter_list:
+        return []
+
+    ordered = _order_perimeter(perimeter_list, pos)
 
     # Generate actions
     actions = []
@@ -917,9 +1005,12 @@ def plan_corridor_exploration(
             if cmap_idx in CORRIDOR_CMAP:
                 all_visible_corridors.add((col, row))
 
+    # Expand corridor_set to include all visible corridors for target selection
+    # Do this FIRST so monster detection works on the full set
+    corridor_set = corridor_set | all_visible_corridors
+
     # All corridor tiles should be walkable for pathfinding
-    # Include both detected corridor set AND all visible corridor glyphs
-    extra_walkable = set(corridor_set) | all_visible_corridors
+    extra_walkable = set(corridor_set)
     extra_walkable.add(pos)
 
     # Also add adjacent door tiles as walkable (player might be in doorway)
@@ -930,12 +1021,18 @@ def plan_corridor_exploration(
             if cmap_idx in DOOR_CMAP:
                 extra_walkable.add((nx, ny))
 
-    # Find monsters/pets on corridor - also treat as walkable
+    # Find monsters/pets on or adjacent to corridor - also treat as walkable
     monsters = _find_monsters_on_corridor(glyphs, corridor_set)
     extra_walkable |= monsters
 
-    # Expand corridor_set to include all visible corridors for target selection
-    corridor_set = corridor_set | all_visible_corridors
+    # Also check tiles adjacent to corridor for pets (pet might be blocking path)
+    for x, y in list(corridor_set):
+        for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+            nx, ny = x + dx, y + dy
+            if 0 <= ny < rows and 0 <= nx < cols:
+                glyph = int(glyphs[ny, nx])
+                if nethack.glyph_is_monster(glyph) or nethack.glyph_is_pet(glyph):
+                    extra_walkable.add((nx, ny))
 
     # Use visited-aware exploration if visited data available
     if visited:
