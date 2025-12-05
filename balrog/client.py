@@ -637,7 +637,7 @@ class ClaudeSDKWrapper(LLMClientWrapper):
             except Exception as e:
                 logger.warning(f"Error closing SDK session: {e}")
             self._client = None
-        self._turn_count = 0
+        self._llm_call_count = 0
         self._conversation_history = []
         self._last_sent = None
         self._last_received = None
@@ -726,7 +726,7 @@ class ClaudeSDKWrapper(LLMClientWrapper):
         self._conversation_history.append({"role": "user", "content": latest_content})
         self._conversation_history.append({"role": "assistant", "content": self._last_received})
 
-        logger.info(f"ClaudeSDK usage: in={in_tok}, out={out_tok}, turn={self._turn_count}")
+        logger.info(f"ClaudeSDK usage: in={in_tok}, out={out_tok}, call={self._llm_call_count}")
 
         return LLMResponse(
             model_id=self.model_id,
