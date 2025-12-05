@@ -20,7 +20,7 @@ EXPLORATION HELPERS (ALWAYS use these - saves many turns):
   In corridor?  → <|COMPUTE|>explore_corridor<|END|>
   Moving far?   → <|COMPUTE|>travel_to: @x,y<|END|> or travel_to: +dx,dy or travel: dir N
 
-These queue 10-30 actions autonomously. Abort on combat/HP drop.
+These queue many actions autonomously. Abort on combat/HP drop.
 :cautious suffix aborts on any discovery (secret door, passage).
 
 SCANNING HELPERS (get precise info):
@@ -103,13 +103,15 @@ Diagonal: NE=y--,x++  SE=y++,x++  NW=y--,x--  SW=y++,x--
 Open doors: | in horizontal wall (N/S), - in vertical wall (E/W)
 Hidden exits: . or space or # in wall = possible secret door
 
-MEMORY TAGS (use lvl:N suffix for level-specific):
+MEMORY TAGS (use lvl:N suffix for level-specific, expand as needed):
   blocked,lvl:N     - "@x,y:dir" blocked moves (CHECK BEFORE MOVING!)
   frontier,lvl:N    - "@x,y:dir" unexplored directions
   searched,lvl:N    - "@x,y n:N" searched N times (stop after 3)
+  room,lvl:N        - "@identifier searched:y/n dark:y/n shop:y/n temple:y/n"
   stairs,lvl:N      - ">x,y" or "<x,y" stair locations
-  plan              - "GOAL:... NEXT:... STEPS:..."
-  rule (PERSISTENT) - game rules learned
+  altar,lvl:N       - "_x,y alignment"
+  plan              - "GOAL:... NEXT:... STEPS:..." - store with high priority
+  rule              - game rules learned
 
 Use enable_tags/disable_tags to filter. Max 256 chars per entry. Remove stale entries.
 
@@ -119,6 +121,8 @@ SAVE AS PERSISTENT RULE when:
 - Discover monster/item property
 - When not yet sure about long-term value, save as "episode" rule first, promote later
 Format: {"scope": "persistent", "tags": "rule", "prio": 8, "content": "category: discovery"}
+
+Memory is crucial to reduce thinking needs and improve play
 
 NETHACK ESSENTIALS:
 - Eat before Weak. Safe corpses: lichen, floating eye. Deadly: cockatrice.
@@ -139,11 +143,14 @@ ACTION LOG (tag: "actlog", prio: 8):
   Always read T from [STATUS] - don't assume +1 per action.
   Keep last 5-10 entries. Remove stale ones.
 
-[STATUS] line auto-injected each turn: HP, Pw, AC, XL, Turn, Hunger, Dlvl.
+[STATUS] line auto-injected each turn: HP, Pw, AC, XL, Turn, Hungegg/r, Dlvl.
 
 GOAL: Maximize dungeon depth, XP, milestones. Learn from each run.
 
 Apply your NetHack knowledge. Store discoveries as persistent rules.
 Map takes precedence over stale memories. Check "blocked" before moving.
+
+You MUST have ONE plan. If NO PLAN, think and memorize detailed plan.
+If you HAVE a plan, follow it. Mark achieved todos completed.
 
 You MUST end with exactly ONE of: <|ACTION|>...<|END|> OR <|ACTIONS|>...<|END|> OR <|COMPUTE|>...<|END|>
