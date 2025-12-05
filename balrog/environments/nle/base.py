@@ -11,6 +11,51 @@ from .progress import get_progress_system
 from .render import tty_render_image
 from .render_rgb import rgb_render_image
 
+# Glyph to ASCII mapping for walls (cmap indices)
+_CMAP_WALL_CHARS = {
+    1: "|",   # S_vwall (vertical wall)
+    2: "-",   # S_hwall (horizontal wall)
+    3: "-",   # S_tlcorn (top-left corner)
+    4: "-",   # S_trcorn (top-right corner)
+    5: "-",   # S_blcorn (bottom-left corner)
+    6: "-",   # S_brcorn (bottom-right corner)
+}
+
+
+def _fix_missing_walls(tty_chars, glyphs):
+    """Fix NLE bug where wall glyphs don't appear in tty_chars.
+
+    NLE sometimes has walls in the glyph array that don't show up in the
+    TTY display (tty_chars shows spaces where walls should be). This function
+    overlays the correct wall characters from glyph data onto the tty_chars.
+
+    Args:
+        tty_chars: The 24x80 TTY character array from NLE observation.
+        glyphs: The 21x79 glyph array from NLE observation.
+
+    Returns:
+        Modified tty_chars with walls filled in from glyph data.
+    """
+    from nle import nethack
+
+    # Make a copy to avoid modifying the original
+    fixed = tty_chars.copy()
+    stone_glyph = nethack.GLYPH_CMAP_OFF
+
+    # Map rows 1-21 of tty_chars correspond to map rows 0-20 of glyphs
+    for map_y in range(min(21, glyphs.shape[0])):
+        tty_row = map_y + 1  # TTY row 0 is message line
+        for x in range(min(79, glyphs.shape[1])):
+            glyph = glyphs[map_y, x]
+            if glyph != stone_glyph and glyph >= nethack.GLYPH_CMAP_OFF:
+                cmap_idx = glyph - nethack.GLYPH_CMAP_OFF
+                if cmap_idx in _CMAP_WALL_CHARS:
+                    # Only fix if TTY shows space
+                    if fixed[tty_row, x] == ord(" "):
+                        fixed[tty_row, x] = ord(_CMAP_WALL_CHARS[cmap_idx])
+
+    return fixed
+
 
 class NLELanguageWrapper(language_wrapper.NLELanguageWrapper):
     def __init__(self, env, vlm=False, prompt_mode: str | None = None):
@@ -160,6 +205,7 @@ class NLELanguageWrapper(language_wrapper.NLELanguageWrapper):
             "tty_chars": nle_obsv["tty_chars"],
             "tty_cursor": nle_obsv["tty_cursor"],
             "blstats": blstats,
+            "glyphs": glyphs,  # Raw glyphs for wall fix
         }
 
     def render_text(self, nle_obsv):
@@ -183,7 +229,9 @@ class NLELanguageWrapper(language_wrapper.NLELanguageWrapper):
         }
 
     def render_hybrid(self, nle_obsv):
-        ascii_map = self.ascii_render(nle_obsv["tty_chars"])
+        # Fix NLE bug: walls in glyphs may not appear in tty_chars
+        tty_chars = _fix_missing_walls(nle_obsv["tty_chars"], nle_obsv["glyphs"])
+        ascii_map = self.ascii_render(tty_chars)
         # Use blstats for position (map coordinates), not tty_cursor (screen coordinates)
         blstats = nle_obsv["blstats"]
         pos = f"(x={int(blstats[0])}, y={int(blstats[1])})"
@@ -212,7 +260,9 @@ class NLELanguageWrapper(language_wrapper.NLELanguageWrapper):
 
     def render_map_only(self, nle_obsv):
         """Render with ASCII map only, no language observation (less confusing for LLMs)."""
-        ascii_map = self.ascii_render(nle_obsv["tty_chars"])
+        # Fix NLE bug: walls in glyphs may not appear in tty_chars
+        tty_chars = _fix_missing_walls(nle_obsv["tty_chars"], nle_obsv["glyphs"])
+        ascii_map = self.ascii_render(tty_chars)
         # Use blstats for position (map coordinates), not tty_cursor (screen coordinates)
         # tty_cursor[0] = screen row (includes message line), blstats[1] = map row
         blstats = nle_obsv["blstats"]

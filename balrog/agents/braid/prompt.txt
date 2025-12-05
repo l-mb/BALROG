@@ -121,6 +121,7 @@ SAVE AS PERSISTENT RULE when:
 - Game mechanic surprises you
 - Strategy works or fails consistently
 - Discover monster/item property
+- When UNCERTAIN about long-term value, save as "episode" rule first, promote later
 Format: {"scope": "persistent", "tags": "rule", "prio": 8, "content": "category: discovery"}
 
 NETHACK ESSENTIALS:
