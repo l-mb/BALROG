@@ -707,6 +707,13 @@ class BRAIDAgent(BaseAgent):
                 else:
                     results.append("scan_items: ERROR (no tty_chars)")
 
+            elif request.strip() == "scan_traps":
+                from .compute.navigation import scan_traps
+                if tty_chars is not None:
+                    results.append(f"scan_traps: {scan_traps(glyphs, tty_chars, pos)}")
+                else:
+                    results.append("scan_traps: ERROR (no tty_chars)")
+
             elif request.strip() == "unexplored":
                 from .compute.navigation import find_unexplored
                 results.append(f"unexplored: {find_unexplored(glyphs, pos)}")

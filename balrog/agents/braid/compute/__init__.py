@@ -15,6 +15,7 @@ from .navigation import (
     plan_room_exploration,
     scan_items,
     scan_monsters,
+    scan_traps,
 )
 
 __all__ = [
@@ -26,6 +27,7 @@ __all__ = [
     "format_status",
     "scan_monsters",
     "scan_items",
+    "scan_traps",
     "find_unexplored",
     "find_exits",
     "detect_room",

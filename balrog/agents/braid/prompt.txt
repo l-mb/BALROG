@@ -26,6 +26,7 @@ These queue 10-30 actions autonomously. Abort on combat/HP drop.
 SCANNING HELPERS (get precise info):
   <|COMPUTE|>scan_monsters<|END|>  - list monsters with coords and distance
   <|COMPUTE|>scan_items<|END|>     - list visible items
+  <|COMPUTE|>scan_traps<|END|>     - list discovered traps
   <|COMPUTE|>unexplored<|END|>     - find exploration frontiers
   <|COMPUTE|>exits<|END|>          - find room exits
 

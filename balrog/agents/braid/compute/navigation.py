@@ -46,15 +46,25 @@ def get_position(blstats: np.ndarray) -> tuple[int, int]:
     return int(blstats[0]), int(blstats[1])
 
 
-def build_walkable_mask(glyphs: np.ndarray) -> np.ndarray:
+def build_walkable_mask(glyphs: np.ndarray, avoid_traps: bool = True) -> np.ndarray:
     """Build mask of walkable tiles for pathfinding.
 
     Only explored tiles that are floors, corridors, doors, stairs, etc.
     are considered walkable. Unexplored tiles (S_stone) are NOT walkable.
+    Discovered traps are avoided by default.
     """
     walkable = np.zeros(glyphs.shape, dtype=bool)
     for idx in WALKABLE_CMAP:
         walkable |= glyphs == CMAP_OFF + idx
+
+    # Exclude discovered traps from walkable tiles
+    if avoid_traps:
+        rows, cols = glyphs.shape
+        for row in range(rows):
+            for col in range(cols):
+                if nethack.glyph_is_trap(int(glyphs[row, col])):
+                    walkable[row, col] = False
+
     return walkable
 
 
@@ -246,6 +256,38 @@ def scan_items(
     return " ".join(f"{m[0]}@{m[1]},{m[2]}({m[3]})" for m in items[:15])
 
 
+def scan_traps(
+    glyphs: np.ndarray, tty_chars: np.ndarray, pos: tuple[int, int]
+) -> str:
+    """Scan for discovered traps on the map.
+
+    Args:
+        glyphs: 2D glyph array from observation
+        tty_chars: 2D ASCII character array from observation
+        pos: Current (x, y) position
+
+    Returns:
+        Formatted string of traps: "^@44,10(2) ^@42,11(5)" or "none"
+    """
+    px, py = pos
+    traps = []
+
+    for row in range(glyphs.shape[0]):
+        for col in range(glyphs.shape[1]):
+            glyph = int(glyphs[row, col])
+            if nethack.glyph_is_trap(glyph):
+                char = chr(tty_chars[row, col]) if tty_chars[row, col] > 0 else "^"
+                d = distance(px, py, col, row)
+                traps.append((char, col, row, d))
+
+    if not traps:
+        return "none"
+
+    # Sort by distance
+    traps.sort(key=lambda t: t[3])
+    return " ".join(f"{t[0]}@{t[1]},{t[2]}({t[3]})" for t in traps[:10])
+
+
 # Stone glyph (unexplored) - cmap index 0
 S_STONE = CMAP_OFF + 0
 
@@ -306,10 +348,50 @@ CORRIDOR_CMAP = {21, 22}
 FLOOR_CMAP = {19, 20}  # S_room, S_darkroom
 
 
+def _is_room_tile(glyphs: np.ndarray, x: int, y: int, room_tiles: set[tuple[int, int]]) -> bool:
+    """Check if tile is a floor tile or likely on floor (item/monster on floor).
+
+    Items and monsters overlay floor glyphs, so we need to check if they're
+    adjacent to known room tiles to include them in the room.
+    Traps are also included as room tiles (they're on the floor).
+    """
+    rows, cols = glyphs.shape
+    if not (0 <= y < rows and 0 <= x < cols):
+        return False
+
+    glyph = int(glyphs[y, x])
+    cmap_idx = glyph - CMAP_OFF
+
+    # Direct floor glyph
+    if cmap_idx in FLOOR_CMAP:
+        return True
+
+    # Traps are on floor tiles - include them in room detection
+    if nethack.glyph_is_trap(glyph):
+        return True
+
+    # Item or monster - check if adjacent to known room tile (probably on floor)
+    if nethack.glyph_is_object(glyph) or nethack.glyph_is_monster(glyph) or nethack.glyph_is_pet(glyph):
+        for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+            if (x + dx, y + dy) in room_tiles:
+                return True
+        # Also check if adjacent to floor glyph directly
+        for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+            nx, ny = x + dx, y + dy
+            if 0 <= ny < rows and 0 <= nx < cols:
+                adj_cmap = int(glyphs[ny, nx]) - CMAP_OFF
+                if adj_cmap in FLOOR_CMAP:
+                    return True
+
+    return False
+
+
 def detect_room(
     glyphs: np.ndarray, pos: tuple[int, int]
 ) -> set[tuple[int, int]] | None:
     """Flood-fill to detect room from current position.
+
+    Handles items and monsters on floor tiles by checking adjacency.
 
     Args:
         glyphs: 2D glyph array from observation
@@ -342,7 +424,7 @@ def detect_room(
     if not seed_tiles:
         return None  # Not adjacent to any floor tiles
 
-    # Flood fill from seed tiles
+    # Flood fill from seed tiles, including tiles with items/monsters
     room_tiles: set[tuple[int, int]] = set()
     # Include player position even though glyph differs (player/monster overlay)
     room_tiles.add((px, py))
@@ -354,8 +436,9 @@ def detect_room(
             continue
         if not (0 <= y < rows and 0 <= x < cols):
             continue
-        cmap = int(glyphs[y, x]) - CMAP_OFF
-        if cmap not in FLOOR_CMAP:
+
+        # Check if this is a room tile (floor, or item/monster on floor)
+        if not _is_room_tile(glyphs, x, y, room_tiles):
             continue
 
         room_tiles.add((x, y))
@@ -529,20 +612,46 @@ def _find_perimeter(
 def _order_perimeter(
     perimeter: list[tuple[int, int]], start: tuple[int, int]
 ) -> list[tuple[int, int]]:
-    """Order perimeter tiles for efficient walk using nearest-neighbor heuristic."""
+    """Order perimeter tiles for efficient clockwise walk around the room.
+
+    Uses connected-component walking to trace the perimeter rather than
+    greedy nearest-neighbor which can jump around and miss tiles.
+    """
     if not perimeter:
         return []
 
-    # Start from nearest to current position
-    remaining = set(perimeter)
-    ordered = []
-    current = min(remaining, key=lambda p: distance(start[0], start[1], p[0], p[1]))
+    perimeter_set = set(perimeter)
 
-    while remaining:
-        ordered.append(current)
-        remaining.discard(current)
-        if remaining:
-            current = min(remaining, key=lambda p: distance(current[0], current[1], p[0], p[1]))
+    # Start from nearest to current position
+    first = min(perimeter_set, key=lambda p: distance(start[0], start[1], p[0], p[1]))
+
+    # Walk around the perimeter by following adjacent tiles
+    # Priority: clockwise order (E, SE, S, SW, W, NW, N, NE)
+    clockwise_dirs = [(1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)]
+
+    ordered = [first]
+    visited = {first}
+    current = first
+
+    while len(visited) < len(perimeter_set):
+        # Find next unvisited perimeter tile, preferring clockwise order
+        next_tile = None
+        for dx, dy in clockwise_dirs:
+            neighbor = (current[0] + dx, current[1] + dy)
+            if neighbor in perimeter_set and neighbor not in visited:
+                next_tile = neighbor
+                break
+
+        if next_tile is None:
+            # No adjacent unvisited - jump to nearest unvisited
+            unvisited = perimeter_set - visited
+            if not unvisited:
+                break
+            next_tile = min(unvisited, key=lambda p: distance(current[0], current[1], p[0], p[1]))
+
+        ordered.append(next_tile)
+        visited.add(next_tile)
+        current = next_tile
 
     return ordered
 
@@ -567,11 +676,18 @@ def plan_room_exploration(
 
     ordered = _order_perimeter(perimeter, pos)
 
+    # Find tiles with items/monsters that need to be walkable for pathfinding
+    extra_walkable = {pos}
+    rows, cols = glyphs.shape
+    for x, y in room_tiles:
+        if 0 <= y < rows and 0 <= x < cols:
+            glyph = int(glyphs[y, x])
+            if nethack.glyph_is_object(glyph) or nethack.glyph_is_monster(glyph) or nethack.glyph_is_pet(glyph):
+                extra_walkable.add((x, y))
+
     # Generate actions
     actions = []
     current = pos
-    # Player position may have non-walkable glyph - mark as walkable for pathfinding
-    extra_walkable = {pos}
 
     for target in ordered:
         # Path to target
