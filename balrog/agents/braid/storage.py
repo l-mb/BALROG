@@ -418,3 +418,12 @@ class BraidStorage:
             (self.worker_id, episode, dlvl, x, y, step),
         )
         self.conn.commit()
+
+    def get_visited_for_level(self, episode: int, dlvl: int) -> set[tuple[int, int]]:
+        """Get all visited (x, y) positions for current episode/level."""
+        rows = self.conn.execute(
+            """SELECT x, y FROM visited
+               WHERE worker_id = ? AND episode = ? AND dlvl = ?""",
+            (self.worker_id, episode, dlvl),
+        ).fetchall()
+        return {(row[0], row[1]) for row in rows}

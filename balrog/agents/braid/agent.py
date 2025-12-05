@@ -527,7 +527,7 @@ class BRAIDAgent(BaseAgent):
         if any(p in text_lower for p in trap_triggers):
             return True
 
-        # Cautious mode: abort on any map discovery (new glyphs appearing)
+        # Cautious mode: abort on nearby map discovery (new glyphs appearing close to player)
         if self._cautious_mode and self._last_glyphs is not None:
             raw_obs = obs.get("obs", {})
             glyphs = raw_obs.get("glyphs") if isinstance(raw_obs, dict) else None
@@ -539,12 +539,30 @@ class BRAIDAgent(BaseAgent):
                 was_stone = self._last_glyphs == stone_glyph
                 now_not_stone = glyphs != stone_glyph
                 newly_revealed = was_stone & now_not_stone
-                if np.any(newly_revealed):
-                    self.storage.log_error(
-                        self.episode_number, self._step,
-                        f"Cautious abort: {np.sum(newly_revealed)} tiles revealed"
-                    )
-                    return True
+
+                # Only abort if reveals are NEAR the player (within 3 tiles)
+                # Distant reveals (e.g., "You hear a door open") are not dangerous
+                pos_info = self._extract_position_info(obs)
+                if np.any(newly_revealed) and pos_info:
+                    px, py = pos_info[0], pos_info[1]
+                    rows, cols = glyphs.shape
+                    nearby_reveal = False
+                    for dy in range(-3, 4):
+                        for dx in range(-3, 4):
+                            ny, nx = py + dy, px + dx
+                            if 0 <= ny < rows and 0 <= nx < cols:
+                                if newly_revealed[ny, nx]:
+                                    nearby_reveal = True
+                                    break
+                        if nearby_reveal:
+                            break
+
+                    if nearby_reveal:
+                        self.storage.log_error(
+                            self.episode_number, self._step,
+                            f"Cautious abort: {np.sum(newly_revealed)} tiles revealed nearby"
+                        )
+                        return True
                 # Update snapshot
                 self._last_glyphs = glyphs.copy()
 
@@ -592,13 +610,17 @@ class BRAIDAgent(BaseAgent):
             return False
 
         pos = (pos_info[0], pos_info[1])
+        dlvl = pos_info[2]
+
+        # Get visited tiles for this level
+        visited = self.storage.get_visited_for_level(self.episode_number, dlvl)
 
         # Re-plan based on exploration type
         if self._batch_source == "explore_room":
             from .compute.navigation import detect_room, plan_room_exploration
             room = detect_room(glyphs, pos)
             if room:
-                new_actions = plan_room_exploration(glyphs, room, pos)
+                new_actions = plan_room_exploration(glyphs, room, pos, visited=visited)
                 if new_actions:
                     self._action_queue = list(new_actions)
                     self._batch_total = len(new_actions)
@@ -613,7 +635,7 @@ class BRAIDAgent(BaseAgent):
             from .compute.navigation import detect_corridor, plan_corridor_exploration
             corridor = detect_corridor(glyphs, pos)
             if corridor:
-                new_actions = plan_corridor_exploration(glyphs, corridor, pos)
+                new_actions = plan_corridor_exploration(glyphs, corridor, pos, visited=visited)
                 if new_actions:
                     self._action_queue = list(new_actions)
                     self._batch_total = len(new_actions)
@@ -816,7 +838,10 @@ class BRAIDAgent(BaseAgent):
                 cautious = request.strip().endswith(":cautious")
                 room = detect_room(glyphs, pos)
                 if room:
-                    actions = plan_room_exploration(glyphs, room, pos)
+                    # Get visited tiles for this level
+                    dlvl = int(blstats[12])
+                    visited = self.storage.get_visited_for_level(self.episode_number, dlvl)
+                    actions = plan_room_exploration(glyphs, room, pos, visited=visited)
                     if actions:
                         self._action_queue.extend(actions)
                         self._queue_start_hp = self._extract_hp(obs)
@@ -838,7 +863,10 @@ class BRAIDAgent(BaseAgent):
                 cautious = request.strip().endswith(":cautious")
                 corridor = detect_corridor(glyphs, pos)
                 if corridor:
-                    actions = plan_corridor_exploration(glyphs, corridor, pos)
+                    # Get visited tiles for this level
+                    dlvl = int(blstats[12])
+                    visited = self.storage.get_visited_for_level(self.episode_number, dlvl)
+                    actions = plan_corridor_exploration(glyphs, corridor, pos, visited=visited)
                     if actions:
                         self._action_queue.extend(actions)
                         self._queue_start_hp = self._extract_hp(obs)

@@ -677,123 +677,120 @@ def _order_perimeter(
     return ordered
 
 
-def _is_dark_room(
-    glyphs: np.ndarray, room_tiles: set[tuple[int, int]], pos: tuple[int, int]
-) -> bool:
-    """Check if this appears to be a dark room (limited visibility).
-
-    Dark rooms show only tiles adjacent to player, surrounded by unexplored stone.
-    """
-    rows, cols = glyphs.shape
-    px, py = pos
-
-    # Check if any room tile borders unexplored stone (not walls)
-    # In dark rooms, the edge of visibility is stone, not walls
-    stone_neighbors = 0
-    for x, y in room_tiles:
-        for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
-            nx, ny = x + dx, y + dy
-            if 0 <= ny < rows and 0 <= nx < cols:
-                if (nx, ny) not in room_tiles:
-                    if glyphs[ny, nx] == S_STONE:
-                        stone_neighbors += 1
-
-    # If most perimeter is unexplored stone (not walls), it's likely a dark room
-    # Small visible area + stone borders = dark room
-    return len(room_tiles) <= 12 and stone_neighbors >= 3
-
-
-def _plan_dark_room_exploration(
-    glyphs: np.ndarray, room_tiles: set[tuple[int, int]], pos: tuple[int, int]
+def plan_visited_aware_exploration(
+    glyphs: np.ndarray,
+    walkable_tiles: set[tuple[int, int]],
+    pos: tuple[int, int],
+    visited: set[tuple[int, int]],
 ) -> list[str]:
-    """Plan exploration for dark room by moving toward unexplored edges.
+    """Plan exploration prioritizing unvisited walkable tiles.
 
-    In dark rooms, we can't see the full room. Strategy:
-    1. Find directions with unexplored stone (potential room continuation)
-    2. Move toward those directions to reveal more
-    3. Search along the way
+    Works for rooms (lit/dark/partial) and corridors.
+    Uses visited tiles as known-walkable for pathfinding.
+
+    Args:
+        glyphs: 2D glyph array from observation
+        walkable_tiles: Set of tiles known/believed to be walkable (room floor, corridor)
+        pos: Current (x, y) position
+        visited: Set of tiles player has stepped on this episode/level
+
+    Returns:
+        List of actions to explore unvisited tiles, with searches at perimeter
     """
-    rows, cols = glyphs.shape
-    px, py = pos
+    unvisited = walkable_tiles - visited
 
-    # Find tiles at edge of visibility that border unexplored stone
-    frontier_tiles = []
-    for x, y in room_tiles:
-        for dir_name, (dy, dx) in DIRS.items():
-            nx, ny = x + dx, y + dy
-            if 0 <= ny < rows and 0 <= nx < cols:
-                if glyphs[ny, nx] == S_STONE:
-                    frontier_tiles.append((x, y, dir_name))
-
-    if not frontier_tiles:
-        # No unexplored edges - room might be fully visible now
+    if not unvisited:
+        # All walkable tiles visited - return empty (caller handles perimeter search)
         return []
 
-    # Group by direction to find primary exploration direction
-    dir_counts: dict[str, list[tuple[int, int]]] = {}
-    for x, y, dir_name in frontier_tiles:
-        base_dir = dir_name.replace("north", "n").replace("south", "s").replace("east", "e").replace("west", "w")
-        if base_dir not in dir_counts:
-            dir_counts[base_dir] = []
-        dir_counts[base_dir].append((x, y))
+    # Find perimeter tiles (wall-adjacent) for searching
+    perimeter = set(_find_perimeter(walkable_tiles))
+    unvisited_perimeter = perimeter - visited
 
-    # Pick direction with most unexplored neighbors
-    best_dir = max(dir_counts.keys(), key=lambda d: len(dir_counts[d]))
-    target_tiles = dir_counts[best_dir]
+    # For corridors (narrow, most tiles are perimeter), visit ALL unvisited
+    # For rooms, prioritize perimeter for secret door searches
+    is_corridor_like = len(perimeter) > len(walkable_tiles) * 0.7
 
-    # Find the furthest tile in that direction from player
-    if "n" in best_dir:
-        target = min(target_tiles, key=lambda t: t[1])  # lowest y
-    elif "s" in best_dir:
-        target = max(target_tiles, key=lambda t: t[1])  # highest y
-    elif "e" in best_dir:
-        target = max(target_tiles, key=lambda t: t[0])  # highest x
-    elif "w" in best_dir:
-        target = min(target_tiles, key=lambda t: t[0])  # lowest x
+    if is_corridor_like:
+        # Corridors: visit all unvisited tiles
+        targets = unvisited
+    elif unvisited_perimeter:
+        # Rooms: prioritize unvisited perimeter
+        targets = unvisited_perimeter
     else:
-        target = target_tiles[0]
+        targets = unvisited
 
-    # Path to target, search, then continue in that direction
-    extra_walkable = set(room_tiles) | {pos}
-    path = pathfind(glyphs, pos, target, extra_walkable)
+    # BFS tour through targets, using visited as known-walkable
+    # Combine visited (confirmed) + walkable_tiles (visible) for pathfinding
+    extra_walkable = visited | walkable_tiles | {pos}
 
-    actions = []
-    if path:
+    # Also add monster/pet positions as walkable (can swap places)
+    rows, cols = glyphs.shape
+    for x, y in walkable_tiles:
+        if 0 <= y < rows and 0 <= x < cols:
+            glyph = int(glyphs[y, x])
+            if nethack.glyph_is_monster(glyph) or nethack.glyph_is_pet(glyph):
+                extra_walkable.add((x, y))
+
+    actions: list[str] = []
+    current = pos
+    remaining = set(targets)
+
+    while remaining:
+        # Find nearest unvisited target
+        nearest = min(remaining, key=lambda t: distance(current[0], current[1], t[0], t[1]))
+
+        path = pathfind(glyphs, current, nearest, extra_walkable)
+
+        if path is None:
+            # No path found - skip this target
+            remaining.discard(nearest)
+            continue
+
         actions.extend(path)
-        actions.append("search")
 
-        # Add a few more steps in the exploration direction to reveal more
-        # Map short direction name back to full name
-        dir_map = {"n": "north", "s": "south", "e": "east", "w": "west",
-                   "ne": "northeast", "nw": "northwest", "se": "southeast", "sw": "southwest"}
-        if best_dir in dir_map:
-            # Try to continue in that direction (will stop if hits wall)
-            actions.extend([dir_map[best_dir]] * 3)
+        # Search if at perimeter
+        if nearest in perimeter:
             actions.append("search")
+
+        current = nearest
+        remaining.discard(nearest)
+
+        # Limit actions per call to avoid very long queues
+        if len(actions) > 30:
+            break
 
     return actions
 
 
 def plan_room_exploration(
-    glyphs: np.ndarray, room_tiles: set[tuple[int, int]], pos: tuple[int, int]
+    glyphs: np.ndarray,
+    room_tiles: set[tuple[int, int]],
+    pos: tuple[int, int],
+    visited: set[tuple[int, int]] | None = None,
 ) -> list[str]:
-    """Plan efficient perimeter walk with searches.
+    """Plan room exploration using visited-aware algorithm.
 
-    For dark rooms (limited visibility), uses expanding exploration instead.
+    Handles lit, dark, and partially lit rooms uniformly by prioritizing
+    unvisited tiles and using visited tiles as known-walkable for pathfinding.
 
     Args:
         glyphs: 2D glyph array from observation
         room_tiles: Set of room floor tiles
         pos: Current (x, y) position
+        visited: Set of tiles player has stepped on (optional)
 
     Returns:
         List of actions (directions + "search")
     """
-    # Check if this is a dark room with limited visibility
-    if _is_dark_room(glyphs, room_tiles, pos):
-        return _plan_dark_room_exploration(glyphs, room_tiles, pos)
+    # Use visited-aware exploration if visited data available
+    if visited:
+        actions = plan_visited_aware_exploration(glyphs, room_tiles, pos, visited)
+        if actions:
+            return actions
+        # All tiles visited - fall through to perimeter search
 
-    # Find and order perimeter
+    # Fallback: perimeter walk (when no visited data or all tiles visited)
     perimeter = _find_perimeter(room_tiles)
     if not perimeter:
         return []
@@ -883,20 +880,25 @@ def _count_walkable_neighbors(
 
 
 def plan_corridor_exploration(
-    glyphs: np.ndarray, corridor: list[tuple[int, int]], pos: tuple[int, int]
+    glyphs: np.ndarray,
+    corridor: list[tuple[int, int]],
+    pos: tuple[int, int],
+    visited: set[tuple[int, int]] | None = None,
 ) -> list[str]:
     """Plan corridor exploration prioritizing unexplored areas.
 
     Strategy:
-    1. Find exploration frontiers (corridor tiles adjacent to unexplored)
-    2. Find dead-ends (tiles with only 1 walkable neighbor)
-    3. Visit frontiers first (prioritize discovery), then dead-ends
-    4. Mark all corridor tiles + pet/monster positions as walkable for pathfinding
+    1. If visited data available, use visited-aware exploration
+    2. Otherwise find exploration frontiers (corridor tiles adjacent to unexplored)
+    3. Find dead-ends (tiles with only 1 walkable neighbor)
+    4. Visit frontiers first (prioritize discovery), then dead-ends
+    5. Mark all corridor tiles + pet/monster positions as walkable for pathfinding
 
     Args:
         glyphs: 2D glyph array from observation
         corridor: Ordered list of corridor tiles
         pos: Current (x, y) position
+        visited: Set of tiles player has stepped on (optional)
 
     Returns:
         List of actions (directions + "search")
@@ -934,6 +936,13 @@ def plan_corridor_exploration(
 
     # Expand corridor_set to include all visible corridors for target selection
     corridor_set = corridor_set | all_visible_corridors
+
+    # Use visited-aware exploration if visited data available
+    if visited:
+        actions = plan_visited_aware_exploration(glyphs, corridor_set, pos, visited)
+        if actions:
+            return actions
+        # All corridor tiles visited - fall through for dead-end searches
 
     # Find tiles adjacent to rooms (floor tiles) - we want to explore AWAY from these
     room_adjacent_tiles: set[tuple[int, int]] = set()

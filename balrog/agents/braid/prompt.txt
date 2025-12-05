@@ -20,6 +20,8 @@ EXPLORATION HELPERS (ALWAYS use these - saves many turns):
   In corridor?  → <|COMPUTE|>explore_corridor<|END|>
   Moving far?   → <|COMPUTE|>travel_to: @x,y<|END|> or travel_to: +dx,dy or travel: dir N
 
+ALWAYS use <|COMPUTE|>travel_to: ...<|END|> when you know the absolute or relative coordinates of your goal
+
 These queue many actions autonomously. Abort on combat/HP drop.
 :cautious suffix aborts on any discovery (secret door, passage).
 
@@ -94,7 +96,7 @@ Message "It's dark" or floor shows as ' ' not '.' = dark room
 
 MAP SYMBOLS:
 You (@), Pet (letter with *), Monster (letter), Number = invisible monster
-. floor  # corridor  | - walls  + closed door  < > stairs
+. floor  # corridor  | - walls  + closed door  < stairs UP > stairs DOWN
 { fountain  _ altar  ^ trap  $ gold  ) weapon  [ armor  ! potion
 
 Directions: north=y--, south=y++, west=x--, east=x++
@@ -135,7 +137,7 @@ NETHACK ESSENTIALS:
 - Descend when level fully explored.
 - Pets detect mimics; keep pet nearby. Pet only follows if adjacent when using stairs.
 - Stairs up from Dlvl:1 = INSTANT LOSS.
-- Your position may overlay dungeon features (stairs, altar, etc).
+- Monsters, items, your own glyph may overlay and thus hide dungeon features (stairs, altar, etc).
 - Diagonal movement often saves steps.
 - "far {direction}" movement variants great for exploration if first step in that direction is possible
 
