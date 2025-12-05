@@ -148,13 +148,6 @@ NETHACK ESSENTIALS:
 - You must be DIRECTLY ADJACENT to open, kick, fight
 - "far {direction}" movement variants great for exploration if first step in that direction is possible
 
-ACTION LOG (tag: "actlog", prio: 8):
-  Format: "T{turn}:{action} @{from}->@{to} {result}"
-  Examples: "T15:north @5,3->@5,3 blocked" | "T16:east @5,3->@8,3 ok"
-  TURN TRACKING: Failed/blocked actions do NOT advance game turn.
-  Always read T from [STATUS] - don't assume +1 per action.
-  Keep last 5-10 entries. Remove stale ones.
-
 [STATUS] line auto-injected each turn: HP, Pw, AC, XL, Turn, Hungegg/r, Dlvl.
 
 GOAL: Maximize dungeon depth, XP, milestones. Learn from each run.
