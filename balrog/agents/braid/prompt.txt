@@ -30,7 +30,7 @@ SCANNING HELPERS (get precise info):
   <|COMPUTE|>scan_monsters<|END|>  - list monsters with coords and distance
   <|COMPUTE|>scan_items<|END|>     - list visible items
   <|COMPUTE|>scan_traps<|END|>     - list discovered traps
-  <|COMPUTE|>unexplored<|END|>     - find exploration frontiers
+  <|COMPUTE|>unexplored<|END|>     - find exploration frontiers, returns @x,y(distance)
   <|COMPUTE|>exits<|END|>          - find room exits
 
 OTHER HELPERS:

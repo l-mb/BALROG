@@ -315,7 +315,7 @@ def find_unexplored(glyphs: np.ndarray, pos: tuple[int, int]) -> str:
         pos: Current (x, y) position
 
     Returns:
-        Formatted string of frontiers: "@44,5(N,3) @50,12(E,7)" or "none"
+        Formatted string of frontiers: "@44,5(3) @50,12(7)" or "none"
     """
     px, py = pos
     walkable = build_walkable_mask(glyphs)
@@ -346,7 +346,7 @@ def find_unexplored(glyphs: np.ndarray, pos: tuple[int, int]) -> str:
 
     # Sort by distance
     frontiers.sort(key=lambda f: f[3])
-    return " ".join(f"@{f[0]},{f[1]}({f[2]},{f[3]})" for f in frontiers[:10])
+    return " ".join(f"@{f[0]},{f[1]}({f[3]})" for f in frontiers[:10])
 
 
 # Cmap indices for doors and corridors
