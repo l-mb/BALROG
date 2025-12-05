@@ -79,8 +79,8 @@
                 {% for r in responses %}
                 <tr>
                   <td class="col-step">{{ r.step }}</td>
-                  <td class="col-action"><code>{{ r.action|default('?', true) }}</code>{% if r.compute_requests %}<br><span class="compute-tag">+compute</span>{% endif %}</td>
-                  <td class="col-reasoning"><pre>{% if r.action_type == 'queued' %}(queued){% elif r.reasoning %}{{ r.reasoning }}{% else %}(no reasoning){% endif %}{% if r.compute_requests %}
+                  <td class="col-action"><code>{{ r.action|default('?', true) }}</code></td>
+                  <td class="col-reasoning"><pre>{% if r.reasoning %}{{ r.reasoning }}{% else %}(no reasoning){% endif %}{% if r.compute_requests %}
 ---
 {% for req in r.compute_requests %}{{ req }}
 {% endfor %}{% endif %}</pre></td>

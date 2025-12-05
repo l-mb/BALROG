@@ -1,9 +1,41 @@
 """SQL queries for BRAID monitor."""
 
 import json
+import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+
+
+def _extract_original_command(raw_completion: str | None) -> str | None:
+    """Extract original command from LLM completion before expansion.
+
+    Returns the content of ACTION/ACTIONS/COMPUTE tags, formatted for display.
+    Handles cases where both COMPUTE and ACTION are present.
+    """
+    if not raw_completion:
+        return None
+
+    parts = []
+
+    # Check for COMPUTE block first
+    if match := re.search(r"<\|COMPUTE\|>(.*?)<\|END\|>", raw_completion, re.DOTALL):
+        compute_cmds = [c.strip() for c in match.group(1).strip().split("\n") if c.strip()]
+        if compute_cmds:
+            parts.append(f"[compute] {', '.join(compute_cmds)}")
+
+    # Check for ACTIONS block (multi-action)
+    if match := re.search(r"<\|ACTIONS\|>(.*?)<\|END\|>", raw_completion, re.DOTALL):
+        actions = [a.strip() for a in match.group(1).strip().split("\n") if a.strip()]
+        if actions:
+            parts.append(", ".join(actions))
+    # Check for ACTION block (single action)
+    elif match := re.search(r"<\|ACTION\|>(.*?)<\|END\|>", raw_completion, re.DOTALL):
+        action = match.group(1).strip()
+        if action:
+            parts.append(action)
+
+    return " + ".join(parts) if parts else None
 
 
 @dataclass
@@ -175,28 +207,40 @@ class MonitorDB:
     def get_recent_responses(
         self, worker_id: str, limit: int = 10, max_step: int | None = None
     ) -> list[dict]:
-        """Get recent responses for an agent (newest first), optionally up to a step."""
+        """Get recent LLM responses for an agent (newest first), optionally up to a step.
+
+        Filters out queued actions (internal execution) - only shows actual LLM decisions.
+        """
+        # Fetch extra rows since we filter out queued actions
+        fetch_limit = limit * 20
         if max_step is not None:
             rows = self.conn.execute(
                 """SELECT step, data FROM journal
                    WHERE worker_id = ? AND event = 'response' AND step <= ?
                    ORDER BY id DESC LIMIT ?""",
-                (worker_id, max_step, limit),
+                (worker_id, max_step, fetch_limit),
             ).fetchall()
         else:
             rows = self.conn.execute(
                 """SELECT step, data FROM journal
                    WHERE worker_id = ? AND event = 'response'
                    ORDER BY id DESC LIMIT ?""",
-                (worker_id, limit),
+                (worker_id, fetch_limit),
             ).fetchall()
-        responses = []
+        responses: list[dict[str, object]] = []
         for row in rows:
+            if len(responses) >= limit:
+                break
             if row["data"]:
                 data = json.loads(row["data"])
+                # Skip queued actions - they're internal execution, not LLM decisions
+                if data.get("action_type") == "queued":
+                    continue
+                raw_completion = data.get("raw_completion")
+                original_cmd = _extract_original_command(raw_completion)
                 responses.append({
                     "step": row["step"],
-                    "action": data.get("action", ""),
+                    "action": original_cmd or data.get("action", ""),
                     "reasoning": data.get("reasoning"),
                     "action_type": data.get("action_type", "single"),
                     "latency_ms": data.get("latency_ms", 0),

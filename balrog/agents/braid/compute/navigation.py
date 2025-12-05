@@ -382,10 +382,47 @@ def detect_room(
     return room_tiles
 
 
+def _is_corridor_tile(glyphs: np.ndarray, x: int, y: int) -> bool:
+    """Check if tile is corridor glyph."""
+    rows, cols = glyphs.shape
+    if not (0 <= y < rows and 0 <= x < cols):
+        return False
+    cmap_idx = int(glyphs[y, x]) - CMAP_OFF
+    return cmap_idx in CORRIDOR_CMAP
+
+
+def _is_monster_on_corridor(
+    glyphs: np.ndarray, x: int, y: int, known_corridor: set[tuple[int, int]]
+) -> bool:
+    """Check if tile has monster/pet that's likely on a corridor.
+
+    A monster adjacent to known corridor tiles is probably standing on corridor.
+    """
+    rows, cols = glyphs.shape
+    if not (0 <= y < rows and 0 <= x < cols):
+        return False
+
+    glyph = int(glyphs[y, x])
+    if not (nethack.glyph_is_monster(glyph) or nethack.glyph_is_pet(glyph)):
+        return False
+
+    # Check if adjacent to known corridor
+    for dy, dx in DIRS.values():
+        if (x + dx, y + dy) in known_corridor:
+            return True
+    # Also check if adjacent to corridor glyph
+    for dy, dx in DIRS.values():
+        if _is_corridor_tile(glyphs, x + dx, y + dy):
+            return True
+    return False
+
+
 def detect_corridor(
     glyphs: np.ndarray, pos: tuple[int, int]
 ) -> list[tuple[int, int]] | None:
     """Detect corridor tiles from current position.
+
+    Handles pets/monsters standing on corridor tiles by checking adjacency.
 
     Args:
         glyphs: 2D glyph array from observation
@@ -403,24 +440,21 @@ def detect_corridor(
     # Player position may not show corridor glyph (player/monster overlay)
     # Seed flood-fill from current or adjacent corridor tiles
     seed_tiles = []
-    cmap_idx = int(glyphs[py, px]) - CMAP_OFF
-    if cmap_idx in CORRIDOR_CMAP:
+    if _is_corridor_tile(glyphs, px, py):
         seed_tiles.append((px, py))
     else:
         # Check adjacent tiles for corridor
         for dy, dx in DIRS.values():
             nx, ny = px + dx, py + dy
-            if 0 <= ny < rows and 0 <= nx < cols:
-                adj_cmap = int(glyphs[ny, nx]) - CMAP_OFF
-                if adj_cmap in CORRIDOR_CMAP:
-                    seed_tiles.append((nx, ny))
+            if _is_corridor_tile(glyphs, nx, ny):
+                seed_tiles.append((nx, ny))
 
     if not seed_tiles:
         return None  # Not adjacent to any corridor tiles
 
-    # Flood fill on corridor tiles
+    # Flood fill on corridor tiles, including monster/pet positions
     corridor_tiles: set[tuple[int, int]] = set()
-    # Include player position
+    # Include player position (might be standing on corridor)
     corridor_tiles.add((px, py))
     queue = list(seed_tiles)
 
@@ -430,8 +464,12 @@ def detect_corridor(
             continue
         if not (0 <= y < rows and 0 <= x < cols):
             continue
-        cmap = int(glyphs[y, x]) - CMAP_OFF
-        if cmap not in CORRIDOR_CMAP:
+
+        # Accept if corridor glyph OR monster adjacent to known corridor
+        is_corridor = _is_corridor_tile(glyphs, x, y)
+        is_monster_on_corr = _is_monster_on_corridor(glyphs, x, y, corridor_tiles)
+
+        if not (is_corridor or is_monster_on_corr):
             continue
 
         corridor_tiles.add((x, y))
@@ -547,10 +585,73 @@ def plan_room_exploration(
     return actions
 
 
+def _find_monsters_on_corridor(
+    glyphs: np.ndarray, corridor_set: set[tuple[int, int]]
+) -> set[tuple[int, int]]:
+    """Find monster/pet positions that overlap with corridor tiles."""
+    monsters = set()
+    rows, cols = glyphs.shape
+    for x, y in corridor_set:
+        if 0 <= y < rows and 0 <= x < cols:
+            glyph = int(glyphs[y, x])
+            if nethack.glyph_is_monster(glyph) or nethack.glyph_is_pet(glyph):
+                monsters.add((x, y))
+    return monsters
+
+
+def _find_corridor_frontiers(
+    glyphs: np.ndarray, corridor_set: set[tuple[int, int]]
+) -> list[tuple[int, int, str]]:
+    """Find corridor tiles adjacent to unexplored areas.
+
+    Returns list of (x, y, directions) where directions indicates unexplored neighbors.
+    """
+    rows, cols = glyphs.shape
+    frontiers = []
+
+    for x, y in corridor_set:
+        unexplored_dirs = []
+        for dir_name, (dy, dx) in DIRS.items():
+            ny, nx = y + dy, x + dx
+            if 0 <= ny < rows and 0 <= nx < cols:
+                if glyphs[ny, nx] == S_STONE:
+                    unexplored_dirs.append(dir_name[0].upper())
+        if unexplored_dirs:
+            frontiers.append((x, y, "".join(sorted(set(unexplored_dirs)))))
+
+    return frontiers
+
+
+def _count_walkable_neighbors(
+    glyphs: np.ndarray, tile: tuple[int, int], corridor_set: set[tuple[int, int]]
+) -> int:
+    """Count walkable neighbors (corridor, door, floor) for dead-end detection."""
+    x, y = tile
+    rows, cols = glyphs.shape
+    count = 0
+    for dy, dx in DIRS.values():
+        nx, ny = x + dx, y + dy
+        if 0 <= ny < rows and 0 <= nx < cols:
+            # Count as neighbor if: corridor tile, or walkable cmap (door/floor/etc)
+            if (nx, ny) in corridor_set:
+                count += 1
+            else:
+                cmap_idx = int(glyphs[ny, nx]) - CMAP_OFF
+                if cmap_idx in WALKABLE_CMAP:
+                    count += 1
+    return count
+
+
 def plan_corridor_exploration(
     glyphs: np.ndarray, corridor: list[tuple[int, int]], pos: tuple[int, int]
 ) -> list[str]:
-    """Plan corridor exploration with searches at dead-ends.
+    """Plan corridor exploration prioritizing unexplored areas.
+
+    Strategy:
+    1. Find exploration frontiers (corridor tiles adjacent to unexplored)
+    2. Find dead-ends (tiles with only 1 walkable neighbor)
+    3. Visit frontiers first (prioritize discovery), then dead-ends
+    4. Mark pet/monster positions as walkable for pathfinding
 
     Args:
         glyphs: 2D glyph array from observation
@@ -565,39 +666,68 @@ def plan_corridor_exploration(
 
     corridor_set = set(corridor)
 
-    # Find true dead-ends: tiles with only 1 corridor neighbor
-    def count_neighbors(tile: tuple[int, int]) -> int:
-        x, y = tile
-        return sum(1 for dy, dx in DIRS.values() if (x + dx, y + dy) in corridor_set)
+    # Find monsters/pets on corridor - treat as walkable for pathfinding
+    monsters = _find_monsters_on_corridor(glyphs, corridor_set)
+    extra_walkable = {pos} | monsters
 
-    dead_ends = [t for t in corridor if count_neighbors(t) == 1]
+    # Find exploration frontiers (tiles adjacent to unexplored stone)
+    frontiers = _find_corridor_frontiers(glyphs, corridor_set)
 
-    # If no dead-ends (loop or T-junction), just walk the corridor without searching
-    if not dead_ends:
-        # Walk to furthest point - at least explores the area
-        if len(corridor) > 1:
-            furthest = max(corridor, key=lambda t: distance(pos[0], pos[1], t[0], t[1]))
-            path = pathfind(glyphs, pos, furthest, extra_walkable={pos})
-            if path:
-                return path
-        return []
+    # Find dead-ends using improved neighbor counting (includes doors/floors)
+    dead_ends = [
+        t for t in corridor
+        if _count_walkable_neighbors(glyphs, t, corridor_set) == 1
+    ]
 
-    # Sort dead-ends by distance (nearest first)
+    # Build target list: frontiers first (sorted by distance), then dead-ends
+    targets = []
+
+    # Add frontiers (prioritize tiles with more unexplored directions)
+    frontier_tiles = [(x, y) for x, y, _ in frontiers]
+    frontier_tiles.sort(key=lambda t: (
+        -len([d for x, y, d in frontiers if (x, y) == t][0] if frontiers else ""),
+        distance(pos[0], pos[1], t[0], t[1])
+    ))
+    for t in frontier_tiles:
+        if t not in targets:
+            targets.append(t)
+
+    # Add dead-ends that aren't already in targets
     dead_ends.sort(key=lambda t: distance(pos[0], pos[1], t[0], t[1]))
+    for t in dead_ends:
+        if t not in targets:
+            targets.append(t)
+
+    # If no targets, walk to furthest corridor tile
+    if not targets and len(corridor) > 1:
+        furthest = max(corridor, key=lambda t: distance(pos[0], pos[1], t[0], t[1]))
+        targets = [furthest]
+
+    if not targets:
+        return []
 
     actions = []
     current = pos
-    # Player position may have non-walkable glyph - mark as walkable for pathfinding
-    extra_walkable = {pos}
+    visited_targets: set[tuple[int, int]] = set()
 
-    for dead_end in dead_ends:
-        path = pathfind(glyphs, current, dead_end, extra_walkable)
-        if path is not None:  # None = no path, [] = already there
+    for target in targets:
+        if target in visited_targets:
+            continue
+
+        path = pathfind(glyphs, current, target, extra_walkable)
+        if path is not None:
             actions.extend(path)
-            current = dead_end
-            # Search at dead-end (4x for thoroughness)
-            actions.extend(["search", "search", "search", "search"])
-        # If pathfind fails (blocked), skip this dead-end
+            current = target
+            visited_targets.add(target)
+
+            # Search if this is a frontier or dead-end
+            is_frontier = target in frontier_tiles
+            is_dead_end = target in dead_ends
+
+            if is_frontier or is_dead_end:
+                # More searches at frontiers (might find secret doors)
+                search_count = 3 if is_frontier else 2
+                actions.extend(["search"] * search_count)
 
     return actions
 

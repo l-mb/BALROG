@@ -82,6 +82,9 @@ class BRAIDAgent(BaseAgent):
         self._queue_start_hp: int | None = None
         self._cautious_mode: bool = False
         self._last_glyphs: Any = None  # For cautious mode discovery detection
+        self._batch_source: str | None = None  # Command that created batch
+        self._batch_total: int = 0  # Original queue size
+        self._batch_executed: int = 0  # Actions executed so far
 
         # Extended thinking preservation
         # Opus 4.5+ has native thinking block preservation, so skip manual injection
@@ -120,16 +123,24 @@ class BRAIDAgent(BaseAgent):
     def _extract_screen(self, obs: dict[str, Any]) -> str | None:
         """Extract ASCII screen from observation (NetHack tty_chars)."""
         tty_chars = None
+        glyphs = None
         # NLE wraps raw observation in obs["obs"]
         raw_obs = obs.get("obs")
         if isinstance(raw_obs, dict):
             tty_chars = raw_obs.get("tty_chars")
+            glyphs = raw_obs.get("glyphs")
         # Fallback: check top level
         if tty_chars is None:
             tty_chars = obs.get("tty_chars")
+        if glyphs is None:
+            glyphs = obs.get("glyphs")
         if tty_chars is None:
             return None
         try:
+            # Fix NLE bug: walls in glyphs may not appear in tty_chars
+            if glyphs is not None:
+                from balrog.environments.nle.base import _fix_missing_walls
+                tty_chars = _fix_missing_walls(tty_chars, glyphs)
             rows, cols = tty_chars.shape
             lines = ["".join(chr(tty_chars[i, j]) for j in range(cols)) for i in range(rows)]
             return "\n".join(lines)
@@ -150,10 +161,8 @@ class BRAIDAgent(BaseAgent):
                     self.episode_number, self._step,
                     f"Queue aborted ({len(self._action_queue)} actions remaining)"
                 )
-                self._action_queue.clear()
-                self._queue_start_hp = None
-                self._cautious_mode = False
-                self._last_glyphs = None
+                self._record_batch_summary(completed=False)
+                self._clear_batch_state()
             else:
                 self._step += 1
                 action_response = self._pop_queued_action()
@@ -355,6 +364,9 @@ class BRAIDAgent(BaseAgent):
         # Queue remaining actions if multi-action response
         if len(actions) > 1:
             self._action_queue = actions[1:]
+            self._batch_source = "multi-action"
+            self._batch_total = len(actions)
+            self._batch_executed = 1  # First action executed this turn
 
         if reasoning:
             self.prompt_builder.update_reasoning(reasoning)
@@ -610,8 +622,10 @@ class BRAIDAgent(BaseAgent):
                 if path:
                     self._action_queue.extend(path)
                     self._queue_start_hp = self._extract_hp(obs)
-                    dirs = " ".join(path)
-                    results.append(f"travel_to: @{gx},{gy} = QUEUED {len(path)} moves ({dirs})")
+                    self._batch_source = f"travel_to(@{gx},{gy})"
+                    self._batch_total = len(path)
+                    self._batch_executed = 0
+                    results.append(f"travel_to: @{gx},{gy} = EXECUTING {len(path)} moves (auto)")
                 else:
                     results.append(f"travel_to: @{gx},{gy} = NO PATH (unexplored/blocked)")
 
@@ -638,8 +652,10 @@ class BRAIDAgent(BaseAgent):
                         if path:
                             self._action_queue.extend(path)
                             self._queue_start_hp = self._extract_hp(obs)
-                            dirs = " ".join(path)
-                            results.append(f"travel: {dir_name} {dist} -> @{gx},{gy} = QUEUED {len(path)} moves")
+                            self._batch_source = f"travel({dir_name},{dist})"
+                            self._batch_total = len(path)
+                            self._batch_executed = 0
+                            results.append(f"travel: {dir_name} {dist} -> @{gx},{gy} = EXECUTING {len(path)} moves (auto)")
                         else:
                             results.append(f"travel: {dir_name} {dist} -> @{gx},{gy} = NO PATH")
                     else:
@@ -679,10 +695,13 @@ class BRAIDAgent(BaseAgent):
                         self._action_queue.extend(actions)
                         self._queue_start_hp = self._extract_hp(obs)
                         self._cautious_mode = cautious
+                        self._batch_source = "explore_room"
+                        self._batch_total = len(actions)
+                        self._batch_executed = 0
                         if cautious:
                             self._last_glyphs = glyphs.copy()
                         mode_str = " (cautious)" if cautious else ""
-                        results.append(f"explore_room{mode_str}: QUEUED {len(actions)} actions")
+                        results.append(f"explore_room{mode_str}: EXECUTING {len(actions)} actions (auto)")
                     else:
                         results.append("explore_room: NO ACTIONS (already at perimeter?)")
                 else:
@@ -698,10 +717,13 @@ class BRAIDAgent(BaseAgent):
                         self._action_queue.extend(actions)
                         self._queue_start_hp = self._extract_hp(obs)
                         self._cautious_mode = cautious
+                        self._batch_source = "explore_corridor"
+                        self._batch_total = len(actions)
+                        self._batch_executed = 0
                         if cautious:
                             self._last_glyphs = glyphs.copy()
                         mode_str = " (cautious)" if cautious else ""
-                        results.append(f"explore_corridor{mode_str}: QUEUED {len(actions)} actions")
+                        results.append(f"explore_corridor{mode_str}: EXECUTING {len(actions)} actions (auto)")
                     else:
                         results.append("explore_corridor: NO ACTIONS")
                 else:
@@ -771,18 +793,36 @@ class BRAIDAgent(BaseAgent):
         if len(self._recent_action_outputs) > self._max_recent_actions:
             self._recent_action_outputs.pop()
 
+    def _record_batch_summary(self, completed: bool) -> None:
+        """Record batch execution summary to action history."""
+        if not self._batch_source:
+            return
+        status = "done" if completed else "aborted"
+        summary = f"{self._batch_source}: {self._batch_executed}/{self._batch_total} {status}"
+        self._recent_action_outputs.insert(0, summary)
+        if len(self._recent_action_outputs) > self._max_recent_actions:
+            self._recent_action_outputs.pop()
+
+    def _clear_batch_state(self) -> None:
+        """Clear all batch/queue tracking state."""
+        self._action_queue.clear()
+        self._queue_start_hp = None
+        self._cautious_mode = False
+        self._last_glyphs = None
+        self._batch_source = None
+        self._batch_total = 0
+        self._batch_executed = 0
+
     def _pop_queued_action(self) -> LLMResponse:
         """Return next queued action without LLM call."""
         action = self._action_queue.pop(0)
         remaining = len(self._action_queue)
+        self._batch_executed += 1
 
-        # Record in action history (queued actions are single actions)
-        self._record_action(action)
-        self._record_action_output([action], None)
-
-        # Clear queue state if exhausted
+        # Record batch summary and clear state when exhausted
         if not self._action_queue:
-            self._queue_start_hp = None
+            self._record_batch_summary(completed=True)
+            self._clear_batch_state()
 
         return LLMResponse(
             model_id="queued",
@@ -910,6 +950,9 @@ class BRAIDAgent(BaseAgent):
         self._queue_start_hp = None
         self._cautious_mode = False
         self._last_glyphs = None
+        self._batch_source = None
+        self._batch_total = 0
+        self._batch_executed = 0
         self._last_extended_thinking = None
         self._recent_actions.clear()
         self._recent_action_outputs.clear()

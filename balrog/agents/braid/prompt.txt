@@ -102,11 +102,6 @@ Diagonal: NE=y--,x++  SE=y++,x++  NW=y--,x--  SW=y++,x--
 Open doors: | in horizontal wall (N/S), - in vertical wall (E/W)
 Hidden exits: . or space or # in wall = possible secret door
 
-MAP EDGE ROOMS:
-- Rooms at dungeon edges may lack wall on that side (map boundary = wall)
-- Example: top-edge room has |..| vertical walls but no ------ top wall
-- This is NORMAL - explore_room still works correctly
-
 MEMORY TAGS (use lvl:N suffix for level-specific):
   blocked,lvl:N     - "@x,y:dir" blocked moves (CHECK BEFORE MOVING!)
   frontier,lvl:N    - "@x,y:dir" unexplored directions
@@ -121,7 +116,7 @@ SAVE AS PERSISTENT RULE when:
 - Game mechanic surprises you
 - Strategy works or fails consistently
 - Discover monster/item property
-- When UNCERTAIN about long-term value, save as "episode" rule first, promote later
+- When not yet sure about long-term value, save as "episode" rule first, promote later
 Format: {"scope": "persistent", "tags": "rule", "prio": 8, "content": "category: discovery"}
 
 NETHACK ESSENTIALS:
@@ -134,6 +129,7 @@ NETHACK ESSENTIALS:
 - Stairs up from Dlvl:1 = INSTANT LOSS.
 - Your position may overlay dungeon features (stairs, altar, etc).
 - Diagonal movement often saves steps.
+- "far {direction}" movement variants great for exploration if first step in that direction is possible
 
 ACTION LOG (tag: "actlog", prio: 8):
   Format: "T{turn}:{action} @{from}->@{to} {result}"
