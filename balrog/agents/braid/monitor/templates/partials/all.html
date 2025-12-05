@@ -4,8 +4,11 @@
     <!-- Left column: Screen + Memory -->
     <div class="left-column">
       <article class="screen-panel">
-        <header>Screen</header>
-        {% if screen %}
+        <header>Screen{% if visited_count %} ({{ visited_count }} visited){% endif %}</header>
+        {% if screen_rows %}
+        <pre class="screen">{% for row in screen_rows %}{% for char, is_visited in row %}{% if is_visited %}<span class="visited">{{ char }}</span>{% else %}{{ char }}{% endif %}{% endfor %}
+{% endfor %}</pre>
+        {% elif screen %}
         <pre class="screen">{{ screen }}</pre>
         {% else %}
         <p class="muted">No screen data (yet)</p>

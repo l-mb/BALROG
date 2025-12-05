@@ -65,6 +65,19 @@ CREATE TABLE IF NOT EXISTS journal (
 CREATE INDEX IF NOT EXISTS idx_journal_episode ON journal(episode, step);
 CREATE INDEX IF NOT EXISTS idx_journal_worker ON journal(worker_id, episode);
 CREATE INDEX IF NOT EXISTS idx_journal_event ON journal(event);
+
+CREATE TABLE IF NOT EXISTS visited (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    worker_id TEXT NOT NULL,
+    episode INTEGER NOT NULL,
+    dlvl INTEGER NOT NULL,
+    x INTEGER NOT NULL,
+    y INTEGER NOT NULL,
+    first_step INTEGER NOT NULL,
+    UNIQUE(worker_id, episode, dlvl, x, y)
+);
+
+CREATE INDEX IF NOT EXISTS idx_visited_lookup ON visited(worker_id, episode, dlvl);
 """
 
 
@@ -293,8 +306,13 @@ class BraidStorage:
         if full_prompt:
             self._log(episode, step, "prompt", {"messages": full_prompt})
 
-    def log_screen(self, episode: int, step: int, screen: str) -> None:
-        self._log(episode, step, "screen", {"screen": screen})
+    def log_screen(
+        self, episode: int, step: int, screen: str, dlvl: int | None = None
+    ) -> None:
+        data: dict[str, Any] = {"screen": screen}
+        if dlvl is not None:
+            data["dlvl"] = dlvl
+        self._log(episode, step, "screen", data)
 
     def log_response(
         self,
@@ -389,3 +407,14 @@ class BraidStorage:
         if not requests:
             return
         self._log(episode, step, "compute", {"requests": requests, "results": results})
+
+    def log_position(
+        self, episode: int, step: int, dlvl: int, x: int, y: int
+    ) -> None:
+        """Log visited position (upsert - only stores first visit)."""
+        self.conn.execute(
+            """INSERT OR IGNORE INTO visited (worker_id, episode, dlvl, x, y, first_step)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (self.worker_id, episode, dlvl, x, y, step),
+        )
+        self.conn.commit()

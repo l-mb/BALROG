@@ -383,3 +383,25 @@ class MonitorDB:
             params,
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def get_visited_positions(
+        self, worker_id: str, episode: int, dlvl: int
+    ) -> set[tuple[int, int]]:
+        """Get all visited (x, y) positions for a specific level."""
+        rows = self.conn.execute(
+            """SELECT x, y FROM visited
+               WHERE worker_id = ? AND episode = ? AND dlvl = ?""",
+            (worker_id, episode, dlvl),
+        ).fetchall()
+        return {(r["x"], r["y"]) for r in rows}
+
+    def get_current_dlvl(self, worker_id: str, episode: int) -> int | None:
+        """Get the current dungeon level from the latest screen log."""
+        row = self.conn.execute(
+            """SELECT json_extract(data, '$.dlvl') as dlvl FROM journal
+               WHERE worker_id = ? AND episode = ? AND event = 'screen'
+                     AND json_extract(data, '$.dlvl') IS NOT NULL
+               ORDER BY id DESC LIMIT 1""",
+            (worker_id, episode),
+        ).fetchone()
+        return int(row["dlvl"]) if row and row["dlvl"] is not None else None

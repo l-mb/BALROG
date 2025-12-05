@@ -149,6 +149,11 @@
     margin: 0;
 }
 
+/* Visited tile overlay for exploration tracking */
+.screen .visited {
+    background-color: rgba(144, 238, 144, 0.3);
+}
+
 /* Memory panel header with controls */
 .memory-panel header {
     display: flex;

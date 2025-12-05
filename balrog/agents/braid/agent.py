@@ -151,6 +151,9 @@ class BRAIDAgent(BaseAgent):
         if prev_action:
             self.prompt_builder.update_action(prev_action)
 
+        # Extract position info for tracking (available for both queued and LLM actions)
+        pos_info = self._extract_position_info(obs)
+
         # Process any pending compute requests from last turn
         self._process_pending_compute(obs)
 
@@ -165,6 +168,10 @@ class BRAIDAgent(BaseAgent):
                 self._clear_batch_state()
             else:
                 self._step += 1
+                # Log position for queued action
+                if pos_info:
+                    x, y, dlvl = pos_info
+                    self.storage.log_position(self.episode_number, self._step, dlvl, x, y)
                 action_response = self._pop_queued_action()
                 # Log queued action
                 self.storage.log_response(
@@ -197,10 +204,16 @@ class BRAIDAgent(BaseAgent):
         self._step += 1
         self._request_start = time.perf_counter()
 
-        # Log screen if available
+        # Log position for LLM action
+        pos_dlvl: int | None = None
+        if pos_info:
+            px, py, pos_dlvl = pos_info
+            self.storage.log_position(self.episode_number, self._step, pos_dlvl, px, py)
+
+        # Log screen if available (include dlvl for monitor overlay)
         screen = self._extract_screen(obs)
         if screen:
-            self.storage.log_screen(self.episode_number, self._step, screen)
+            self.storage.log_screen(self.episode_number, self._step, screen, dlvl=pos_dlvl)
 
         # Log request
         prompt_chars = sum(len(getattr(m, "content", str(m))) for m in messages)
@@ -541,6 +554,23 @@ class BRAIDAgent(BaseAgent):
         hp_match = re.search(r"HP:(\d+)", text)
         if hp_match:
             return int(hp_match.group(1))
+        return None
+
+    def _extract_position_info(
+        self, obs: dict[str, Any]
+    ) -> tuple[int, int, int] | None:
+        """Extract (x, y, dlvl) from observation blstats."""
+        raw_obs = obs.get("obs")
+        if isinstance(raw_obs, dict):
+            blstats = raw_obs.get("blstats")
+            if blstats is not None:
+                try:
+                    x = int(blstats[0])
+                    y = int(blstats[1])
+                    dlvl = int(blstats[12])
+                    return (x, y, dlvl)
+                except (IndexError, TypeError, ValueError):
+                    pass
         return None
 
     def _process_pending_compute(self, obs: dict[str, Any]) -> None:

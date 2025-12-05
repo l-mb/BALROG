@@ -66,11 +66,31 @@ def create_app(db_path: Path) -> Starlette:
         full_prompt = db.get_latest_prompt(worker_id, max_step=current_step)
         full_response = db.get_latest_full_response(worker_id, max_step=current_step)
 
+        # Get visited positions for exploration overlay (all visits, not filtered by step)
+        visited: set[tuple[int, int]] = set()
+        dlvl = db.get_current_dlvl(worker_id, current_episode) if current_episode else None
+        if dlvl is not None and current_episode is not None:
+            visited = db.get_visited_positions(worker_id, current_episode, dlvl)
+
+        # Pre-process screen with visited flags for template
+        # Map row y (0-20) appears at screen row y+1 (rows 1-21)
+        screen_rows: list[list[tuple[str, bool]]] = []
+        if screen:
+            for row_idx, row in enumerate(screen.split("\n")):
+                row_data: list[tuple[str, bool]] = []
+                for col_idx, char in enumerate(row):
+                    is_visited = (
+                        1 <= row_idx <= 21 and (col_idx, row_idx - 1) in visited
+                    )
+                    row_data.append((char, is_visited))
+                screen_rows.append(row_data)
+
         return templates.TemplateResponse(
             request,
             "partials/all.html",
             {
                 "screen": screen,
+                "screen_rows": screen_rows,
                 "stats": stats,
                 "responses": responses,
                 "entries": entries,
@@ -81,6 +101,7 @@ def create_app(db_path: Path) -> Starlette:
                 "max_step": max_step,
                 "full_prompt": full_prompt,
                 "full_response": full_response,
+                "visited_count": len(visited),
             },
         )
 
