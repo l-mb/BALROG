@@ -96,7 +96,10 @@ def nearest(
 
 
 def pathfind(
-    glyphs: np.ndarray, start: tuple[int, int], goal: tuple[int, int]
+    glyphs: np.ndarray,
+    start: tuple[int, int],
+    goal: tuple[int, int],
+    extra_walkable: set[tuple[int, int]] | None = None,
 ) -> list[str] | None:
     """BFS pathfinding on explored walkable tiles.
 
@@ -104,11 +107,19 @@ def pathfind(
         glyphs: 2D glyph array from observation
         start: Starting (x, y) position
         goal: Goal (x, y) position
+        extra_walkable: Additional positions to treat as walkable (e.g., player position)
 
     Returns:
         List of direction names (north, east, etc.) or None if no path exists
     """
     walkable = build_walkable_mask(glyphs)
+
+    # Mark extra positions as walkable (player/monster positions have different glyphs)
+    if extra_walkable:
+        for x, y in extra_walkable:
+            if 0 <= y < glyphs.shape[0] and 0 <= x < glyphs.shape[1]:
+                walkable[y, x] = True
+
     sx, sy = start
     gx, gy = goal
 
@@ -310,16 +321,32 @@ def detect_room(
     px, py = pos
     rows, cols = glyphs.shape
 
-    # Check if current position is a floor tile
     if not (0 <= py < rows and 0 <= px < cols):
         return None
-    cmap_idx = int(glyphs[py, px]) - CMAP_OFF
-    if cmap_idx not in FLOOR_CMAP:
-        return None
 
-    # Flood fill from current position
+    # Player position may not show floor glyph (player/monster/item overlays it)
+    # Seed flood-fill from adjacent floor tiles instead
+    seed_tiles = []
+    cmap_idx = int(glyphs[py, px]) - CMAP_OFF
+    if cmap_idx in FLOOR_CMAP:
+        seed_tiles.append((px, py))
+    else:
+        # Check adjacent tiles for floor
+        for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+            nx, ny = px + dx, py + dy
+            if 0 <= ny < rows and 0 <= nx < cols:
+                adj_cmap = int(glyphs[ny, nx]) - CMAP_OFF
+                if adj_cmap in FLOOR_CMAP:
+                    seed_tiles.append((nx, ny))
+
+    if not seed_tiles:
+        return None  # Not adjacent to any floor tiles
+
+    # Flood fill from seed tiles
     room_tiles: set[tuple[int, int]] = set()
-    queue = [(px, py)]
+    # Include player position even though glyph differs (player/monster overlay)
+    room_tiles.add((px, py))
+    queue = list(seed_tiles)
 
     while queue:
         x, y = queue.pop()
@@ -337,16 +364,20 @@ def detect_room(
             queue.append((x + dx, y + dy))
 
     # Check if it's actually a room (not corridor)
-    if len(room_tiles) < 6:
-        return None  # Too small
+    # Relaxed thresholds for dark rooms where only nearby tiles visible
+    if len(room_tiles) < 3:
+        return None  # Too small (1-2 tiles is just a doorway)
 
     xs = [t[0] for t in room_tiles]
     ys = [t[1] for t in room_tiles]
     width = max(xs) - min(xs) + 1
     height = max(ys) - min(ys) + 1
 
-    if width < 3 or height < 3:
-        return None  # Too narrow, probably corridor
+    # Room if either: spans 2+ in both dimensions, OR has 4+ tiles
+    # This allows dark rooms (small visible area) while rejecting linear corridors
+    if width < 2 or height < 2:
+        if len(room_tiles) < 4:
+            return None  # Linear, probably corridor
 
     return room_tiles
 
@@ -366,16 +397,32 @@ def detect_corridor(
     px, py = pos
     rows, cols = glyphs.shape
 
-    # Check if current position is a corridor tile
     if not (0 <= py < rows and 0 <= px < cols):
         return None
+
+    # Player position may not show corridor glyph (player/monster overlay)
+    # Seed flood-fill from current or adjacent corridor tiles
+    seed_tiles = []
     cmap_idx = int(glyphs[py, px]) - CMAP_OFF
-    if cmap_idx not in CORRIDOR_CMAP:
-        return None
+    if cmap_idx in CORRIDOR_CMAP:
+        seed_tiles.append((px, py))
+    else:
+        # Check adjacent tiles for corridor
+        for dy, dx in DIRS.values():
+            nx, ny = px + dx, py + dy
+            if 0 <= ny < rows and 0 <= nx < cols:
+                adj_cmap = int(glyphs[ny, nx]) - CMAP_OFF
+                if adj_cmap in CORRIDOR_CMAP:
+                    seed_tiles.append((nx, ny))
+
+    if not seed_tiles:
+        return None  # Not adjacent to any corridor tiles
 
     # Flood fill on corridor tiles
     corridor_tiles: set[tuple[int, int]] = set()
-    queue = [(px, py)]
+    # Include player position
+    corridor_tiles.add((px, py))
+    queue = list(seed_tiles)
 
     while queue:
         x, y = queue.pop()
@@ -485,15 +532,17 @@ def plan_room_exploration(
     # Generate actions
     actions = []
     current = pos
+    # Player position may have non-walkable glyph - mark as walkable for pathfinding
+    extra_walkable = {pos}
 
     for target in ordered:
         # Path to target
-        path = pathfind(glyphs, current, target)
-        if path:
+        path = pathfind(glyphs, current, target, extra_walkable)
+        if path is not None:  # None = no path, [] = already there
             actions.extend(path)
             current = target
-        # Search at wall
-        actions.append("search")
+            # Search at wall
+            actions.append("search")
 
     return actions
 
@@ -501,7 +550,7 @@ def plan_room_exploration(
 def plan_corridor_exploration(
     glyphs: np.ndarray, corridor: list[tuple[int, int]], pos: tuple[int, int]
 ) -> list[str]:
-    """Plan corridor exploration with searches at ends.
+    """Plan corridor exploration with searches at dead-ends.
 
     Args:
         glyphs: 2D glyph array from observation
@@ -514,34 +563,41 @@ def plan_corridor_exploration(
     if not corridor:
         return []
 
+    corridor_set = set(corridor)
+
+    # Find true dead-ends: tiles with only 1 corridor neighbor
+    def count_neighbors(tile: tuple[int, int]) -> int:
+        x, y = tile
+        return sum(1 for dy, dx in DIRS.values() if (x + dx, y + dy) in corridor_set)
+
+    dead_ends = [t for t in corridor if count_neighbors(t) == 1]
+
+    # If no dead-ends (loop or T-junction), just walk the corridor without searching
+    if not dead_ends:
+        # Walk to furthest point - at least explores the area
+        if len(corridor) > 1:
+            furthest = max(corridor, key=lambda t: distance(pos[0], pos[1], t[0], t[1]))
+            path = pathfind(glyphs, pos, furthest, extra_walkable={pos})
+            if path:
+                return path
+        return []
+
+    # Sort dead-ends by distance (nearest first)
+    dead_ends.sort(key=lambda t: distance(pos[0], pos[1], t[0], t[1]))
+
     actions = []
+    current = pos
+    # Player position may have non-walkable glyph - mark as walkable for pathfinding
+    extra_walkable = {pos}
 
-    # Find endpoints
-    start_end = corridor[0]
-    far_end = corridor[-1]
-
-    # Determine which end to explore first (nearest)
-    d_start = distance(pos[0], pos[1], start_end[0], start_end[1])
-    d_far = distance(pos[0], pos[1], far_end[0], far_end[1])
-
-    if d_start <= d_far:
-        first, second = start_end, far_end
-    else:
-        first, second = far_end, start_end
-
-    # Go to first end
-    path = pathfind(glyphs, pos, first)
-    if path:
-        actions.extend(path)
-    # Search at dead-end (3x)
-    actions.extend(["search", "search", "search", "search"])
-
-    # Go to second end
-    path = pathfind(glyphs, first, second)
-    if path:
-        actions.extend(path)
-    # Search at dead-end (3x)
-    actions.extend(["search", "search", "search"])
+    for dead_end in dead_ends:
+        path = pathfind(glyphs, current, dead_end, extra_walkable)
+        if path is not None:  # None = no path, [] = already there
+            actions.extend(path)
+            current = dead_end
+            # Search at dead-end (4x for thoroughness)
+            actions.extend(["search", "search", "search", "search"])
+        # If pathfind fails (blocked), skip this dead-end
 
     return actions
 
