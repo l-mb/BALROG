@@ -46,6 +46,21 @@ def get_position(blstats: np.ndarray) -> tuple[int, int]:
     return int(blstats[0]), int(blstats[1])
 
 
+def find_monster_positions(glyphs: np.ndarray) -> set[tuple[int, int]]:
+    """Find all positions containing monsters or pets.
+
+    These tiles can be walked through (attack monster, swap with pet).
+    """
+    positions: set[tuple[int, int]] = set()
+    rows, cols = glyphs.shape
+    for row in range(rows):
+        for col in range(cols):
+            glyph = int(glyphs[row, col])
+            if nethack.glyph_is_monster(glyph) or nethack.glyph_is_pet(glyph):
+                positions.add((col, row))  # (x, y)
+    return positions
+
+
 def build_walkable_mask(glyphs: np.ndarray, avoid_traps: bool = True) -> np.ndarray:
     """Build mask of walkable tiles for pathfinding.
 

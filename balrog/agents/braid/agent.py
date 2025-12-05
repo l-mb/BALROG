@@ -762,10 +762,13 @@ class BRAIDAgent(BaseAgent):
                     results.append(f"nearest: {feature} = NOT FOUND in explored areas")
 
             elif request.startswith("pathfind:"):
+                from .compute.navigation import find_monster_positions
                 match = re.match(r"pathfind:\s*@(\d+),(\d+)\s*->\s*@(\d+),(\d+)", request)
                 if match:
                     x1, y1, x2, y2 = map(int, match.groups())
-                    path = pathfind(glyphs, (x1, y1), (x2, y2))
+                    # Include monster/pet positions as walkable (can attack/swap)
+                    extra = {pos} | find_monster_positions(glyphs)
+                    path = pathfind(glyphs, (x1, y1), (x2, y2), extra_walkable=extra)
                     if path:
                         dirs = " ".join(path)
                         results.append(
@@ -781,6 +784,7 @@ class BRAIDAgent(BaseAgent):
             elif request.startswith("travel_to:"):
                 # Absolute: travel_to: @45,12
                 # Relative: travel_to: +3,-2 (x+3, y-2 from current position)
+                from .compute.navigation import find_monster_positions
                 abs_match = re.match(r"travel_to:\s*@(\d+),(\d+)", request)
                 rel_match = re.match(r"travel_to:\s*([+-]?\d+),([+-]?\d+)", request)
                 if abs_match:
@@ -792,7 +796,9 @@ class BRAIDAgent(BaseAgent):
                     results.append("travel_to: PARSE ERROR (use @x,y or +dx,dy)")
                     continue
 
-                path = pathfind(glyphs, pos, (gx, gy), extra_walkable={pos})
+                # Include monster/pet positions as walkable (can attack/swap)
+                extra = {pos} | find_monster_positions(glyphs)
+                path = pathfind(glyphs, pos, (gx, gy), extra_walkable=extra)
                 if path:
                     self._action_queue.extend(path)
                     self._queue_start_hp = self._extract_hp(obs)
@@ -805,7 +811,7 @@ class BRAIDAgent(BaseAgent):
 
             elif request.startswith("travel:"):
                 # Direction-based relative travel: travel: north 5, travel: NE 3
-                from .compute.navigation import DIRS
+                from .compute.navigation import DIRS, find_monster_positions
                 dir_match = re.match(
                     r"travel:\s*(north|south|east|west|northeast|northwest|southeast|southwest|N|S|E|W|NE|NW|SE|SW)\s+(\d+)",
                     request, re.IGNORECASE
@@ -822,7 +828,9 @@ class BRAIDAgent(BaseAgent):
                     if dir_name in DIRS:
                         dy, dx = DIRS[dir_name]
                         gx, gy = pos[0] + dx * dist, pos[1] + dy * dist
-                        path = pathfind(glyphs, pos, (gx, gy), extra_walkable={pos})
+                        # Include monster/pet positions as walkable (can attack/swap)
+                        extra = {pos} | find_monster_positions(glyphs)
+                        path = pathfind(glyphs, pos, (gx, gy), extra_walkable=extra)
                         if path:
                             self._action_queue.extend(path)
                             self._queue_start_hp = self._extract_hp(obs)

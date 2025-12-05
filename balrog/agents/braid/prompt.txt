@@ -17,10 +17,11 @@ reset_tags: true
 
 EXPLORATION HELPERS (ALWAYS use these - saves many turns):
   In room?      → <|COMPUTE|>explore_room<|END|>
+  -> MEMORIZE that you have explored a given room unless interrupted
   In corridor?  → <|COMPUTE|>explore_corridor<|END|>
   Moving far?   → <|COMPUTE|>travel_to: @x,y<|END|> or travel_to: +dx,dy or travel: dir N
 
-ALWAYS use <|COMPUTE|>travel_to: ...<|END|> when you know the absolute or relative coordinates of your goal
+ALWAYS use <|COMPUTE|>travel_to: ...<|END|> when you know the absolute or relative coordinates of your goal. You can NOT move into or through closed doors.
 
 These queue many actions autonomously. Abort on combat/HP drop.
 :cautious suffix aborts on any discovery (secret door, passage).
@@ -59,13 +60,15 @@ DECISION TREE - FOLLOW THIS EVERY TURN:
    ├── At junction → pick unexplored branch
    └── Dead end → search 3x, backtrack
 
-   At door (+)?
+   Next To Closed door (+)?
    ├── Closed → open {direction}
+   ├── Resisting → Try again -> open {direction}
    └── Locked (won't open) → kick {direction}
 
 3. CHECK THREATS
    Monster adjacent? → fight {direction} or retreat
-   Monster visible? → approach if strong, avoid if weak
+   Monster visible? → Decide based on health, relative strength
+   Pet? The monster might be your pet (f/d in particular)
 
 4. CHECK OPPORTUNITIES
    Item on ground? → pickup if useful
@@ -92,7 +95,7 @@ Message "It's dark" or floor shows as ' ' not '.' = dark room
    - Search every 3 steps
    - Eventually find door or light
 3. explore_room and explore_corridor DO work in dark rooms
-4. Record dark rooms: {"tags": "dark,lvl:N", "content": "room@x,y dark"}
+4. Record dark rooms via memory protocol
 
 MAP SYMBOLS:
 You (@), Pet (letter with *), Monster (letter), Number = invisible monster
@@ -107,9 +110,9 @@ Hidden exits: . or space or # in wall = possible secret door
 
 MEMORY TAGS (use lvl:N suffix for level-specific):
   blocked,lvl:N     - "@x,y:dir" blocked moves (CHECK BEFORE MOVING!)
-  frontier,lvl:N    - "@x,y:dir" unexplored directions
+  frontier,lvl:N    - "@x,y:dir" unexplored directions, note ends of corridors
   searched,lvl:N    - "@x,y n:N" searched N times (stop after 3)
-  room,lvl:N        - "@identifier searched:y/n dark:y/n shop:y/n temple:y/n"
+  room,lvl:N        - "@identifier searched:y/n explored:y/n dark:y/n shop:y/n temple:y/n"
   stairs,lvl:N      - ">x,y" or "<x,y" stair locations
   altar,lvl:N       - "_x,y alignment"
   plan              - "GOAL:... NEXT:... STEPS:..." - store with high priority
@@ -127,6 +130,7 @@ Format: {"scope": "persistent", "tags": "rule", "prio": 8, "content": "category:
 
 MEMORY GUIDANCE:
 - Crucial to improve benchmark outcomes
+- MUST TRACK explored rooms and frontier and areas so you do not revisit them unnecessarily
 - Use to AVOID repeated actions with stable outcomes
 - Above is guidance, but you can expand as needed within structure
 
