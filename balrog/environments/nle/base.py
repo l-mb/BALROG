@@ -183,12 +183,13 @@ class NLELanguageWrapper(language_wrapper.NLELanguageWrapper):
 
     def render_hybrid(self, nle_obsv):
         ascii_map = self.ascii_render(nle_obsv["tty_chars"])
-        cursor = nle_obsv["tty_cursor"]
-        cursor = f"(x={cursor[1]}, y={cursor[0]})"
+        # Use blstats for position (map coordinates), not tty_cursor (screen coordinates)
+        blstats = nle_obsv["blstats"]
+        pos = f"(x={int(blstats[0])}, y={int(blstats[1])})"
         ascii_map = "\n".join(ascii_map.split("\n")[1:])  # remove first line
 
         nle_obsv["map"] = ascii_map
-        nle_obsv["text_cursor"] = nle_obsv["text_cursor"] + "\n" + cursor
+        nle_obsv["text_cursor"] = nle_obsv["text_cursor"] + "\n" + pos
 
         long_term_observations = [
             ("text_message", "message"),
@@ -211,12 +212,14 @@ class NLELanguageWrapper(language_wrapper.NLELanguageWrapper):
     def render_map_only(self, nle_obsv):
         """Render with ASCII map only, no language observation (less confusing for LLMs)."""
         ascii_map = self.ascii_render(nle_obsv["tty_chars"])
-        cursor = nle_obsv["tty_cursor"]
-        cursor = f"(x={cursor[1]}, y={cursor[0]})"
+        # Use blstats for position (map coordinates), not tty_cursor (screen coordinates)
+        # tty_cursor[0] = screen row (includes message line), blstats[1] = map row
+        blstats = nle_obsv["blstats"]
+        pos = f"(x={int(blstats[0])}, y={int(blstats[1])})"
         ascii_map = "\n".join(ascii_map.split("\n")[1:])  # remove first line
 
         nle_obsv["map"] = ascii_map
-        nle_obsv["text_cursor"] = nle_obsv["text_cursor"] + "\n" + cursor
+        nle_obsv["text_cursor"] = nle_obsv["text_cursor"] + "\n" + pos
 
         # Exclude text_glyphs (language observation) - it often contradicts the map
         long_term_observations = [
