@@ -9,45 +9,45 @@
   <link rel="stylesheet" href="/static/style.css" id="app-css">
 </head>
 <body>
-  <header class="container-fluid">
-    <nav>
-      <ul>
-        <li><strong>BRAID Monitor</strong></li>
-      </ul>
-      <ul>
-        <li>
-          <select id="agent-select" name="agent" onchange="selectAgent(this.value)">
+  <main class="container-fluid">
+    <!-- Stats bar with nav controls (static) + stats (swapped) -->
+    <div class="stats-bar">
+      <div class="stats-row">
+        <!-- Navigation controls - static, not swapped -->
+        <div class="nav-controls">
+          <select id="agent-select" class="agent-select" onchange="selectAgent(this.value)">
             {% for agent in agents %}
             <option value="{{ agent.worker_id }}" {% if agent.worker_id == selected %}selected{% endif %}>
               {{ agent.worker_id }} (ep{{ agent.episode }}:{{ agent.step }})
             </option>
             {% endfor %}
             {% if not agents %}
-            <option value="">No agents found</option>
+            <option value="">No agents</option>
             {% endif %}
           </select>
-        </li>
-        <li>
-          <label>
-            <input type="checkbox" id="autorefresh" checked
-                   onchange="toggleAutoRefresh(this.checked)">
-            Auto-refresh
+          <label class="auto-refresh-toggle">
+            <input type="checkbox" id="autorefresh" checked onchange="toggleAutoRefresh(this.checked)">
+            Auto
           </label>
-        </li>
-        <li id="step-nav" class="step-nav hidden">
-          <button onclick="stepNav(-10)" title="-10 steps">&laquo;</button>
-          <button onclick="stepNav(-1)" title="-1 step">&lsaquo;</button>
-          <span id="step-display">-/-</span>
-          <button onclick="stepNav(1)" title="+1 step">&rsaquo;</button>
-          <button onclick="stepNav(10)" title="+10 steps">&raquo;</button>
-          <button id="play-btn" onclick="togglePlayback()" title="Play/Pause">&#9654;</button>
-          <button onclick="stepNav(Infinity)" title="Latest">Latest</button>
-        </li>
-      </ul>
-    </nav>
-  </header>
+          <div id="step-nav" class="step-nav hidden">
+            <button onclick="stepNav(-10)" title="-10">&laquo;</button>
+            <button onclick="stepNav(-1)" title="-1">&lsaquo;</button>
+            <span id="step-display">-/-</span>
+            <button onclick="stepNav(1)" title="+1">&rsaquo;</button>
+            <button onclick="stepNav(10)" title="+10">&raquo;</button>
+            <button id="play-btn" onclick="togglePlayback()" title="Play">&#9654;</button>
+            <button onclick="stepNav(Infinity)" title="Latest">Live</button>
+          </div>
+        </div>
+        <!-- Stats - swapped via htmx -->
+        <div id="stats-content" class="stats-content">
+          <!-- Initial loading placeholder -->
+          <span class="muted">Loading...</span>
+        </div>
+      </div>
+    </div>
 
-  <main class="container-fluid">
+    <!-- Main panels - swapped via htmx -->
     <div id="panels"
          hx-get="/partials/all/{{ selected }}"
          hx-trigger="load, every 500ms"
@@ -65,8 +65,7 @@
 
     document.body.addEventListener('htmx:beforeSwap', function(evt) {
       // Save scroll positions of scrollable elements
-      document.querySelectorAll('.history-list, .memory-list, .debug-content').forEach(el => {
-        // Use parent class + own class for unique key
+      document.querySelectorAll('.memory-list, .conversation-content').forEach(el => {
         const key = (el.closest('article')?.className || '') + ' ' + el.className;
         scrollPositions[key] = el.scrollTop;
       });
@@ -74,7 +73,7 @@
 
     document.body.addEventListener('htmx:afterSwap', function(evt) {
       // Restore scroll positions
-      document.querySelectorAll('.history-list, .memory-list, .debug-content').forEach(el => {
+      document.querySelectorAll('.memory-list, .conversation-content').forEach(el => {
         const key = (el.closest('article')?.className || '') + ' ' + el.className;
         if (scrollPositions[key] !== undefined) {
           el.scrollTop = scrollPositions[key];
@@ -106,12 +105,12 @@
       if (enabled) {
         stopPlayback();
         panels.setAttribute('hx-trigger', 'load, every 500ms');
-        stepNavEl.classList.add('hidden');
+        if (stepNavEl) stepNavEl.classList.add('hidden');
         currentStep = null;
         updatePanelsUrl();
       } else {
         panels.setAttribute('hx-trigger', 'load');
-        stepNavEl.classList.remove('hidden');
+        if (stepNavEl) stepNavEl.classList.remove('hidden');
       }
       htmx.process(panels);
     }
@@ -193,6 +192,7 @@
         if (response.ok) {
           const html = await response.text();
           const select = document.getElementById('agent-select');
+          if (!select) return;
           const currentValue = select.value;
           select.innerHTML = html;
           // Restore selection (might have new options now)
@@ -210,7 +210,7 @@
       }
     }
 
-    // Refresh agent list every 5 seconds
+    // Refresh agent list every 5 seconds (dropdown is pre-populated on page load)
     setInterval(refreshAgentList, 5000);
 
     // Memory filter state
@@ -254,25 +254,25 @@
 
     // Pause refresh when interacting with controls or scrollable areas
     document.body.addEventListener('focusin', function(evt) {
-      if (evt.target.closest('.memory-controls, #agent-select')) {
+      if (evt.target.closest('.memory-controls, .agent-select, .nav-controls')) {
         pauseRefresh();
       }
     });
 
     document.body.addEventListener('mousedown', function(evt) {
-      if (evt.target.closest('.memory-controls, .col-reasoning, .history-list, .memory-list, .debug-content')) {
+      if (evt.target.closest('.memory-controls, .nav-controls, .memory-list, .conversation-content')) {
         pauseRefresh();
       }
     });
 
     document.body.addEventListener('scroll', function(evt) {
-      if (evt.target.closest && evt.target.closest('.col-reasoning, .history-list, .memory-list, .debug-content')) {
+      if (evt.target.closest && evt.target.closest('.memory-list, .conversation-content')) {
         pauseRefresh();
       }
     }, true);
 
     document.body.addEventListener('wheel', function(evt) {
-      if (evt.target.closest('.col-reasoning, .history-list, .memory-list, .debug-content')) {
+      if (evt.target.closest('.memory-list, .conversation-content')) {
         pauseRefresh();
       }
     }, true);
@@ -284,6 +284,18 @@
       const deletedCheckbox = document.querySelector('.memory-deleted-toggle input');
       if (scopeSelect && memoryScope) scopeSelect.value = memoryScope;
       if (deletedCheckbox) deletedCheckbox.checked = showDeleted;
+
+      // Restore auto-refresh checkbox state
+      const autoRefresh = document.getElementById('autorefresh');
+      const panels = document.getElementById('panels');
+      if (autoRefresh && panels) {
+        const isAuto = panels.getAttribute('hx-trigger')?.includes('every');
+        autoRefresh.checked = isAuto;
+        const stepNavEl = document.getElementById('step-nav');
+        if (stepNavEl) {
+          stepNavEl.classList.toggle('hidden', isAuto);
+        }
+      }
 
       // Update step navigation state from response
       const layout = document.querySelector('.layout');
@@ -303,20 +315,6 @@
 
     // Initialize panels URL on page load
     updatePanelsUrl();
-
-    // Header auto-hide: show when mouse near top
-    const header = document.querySelector('body > header');
-    const HEADER_TRIGGER_ZONE = 50;  // pixels from top
-    document.addEventListener('mousemove', (e) => {
-      if (e.clientY < HEADER_TRIGGER_ZONE) {
-        header.classList.add('visible');
-      } else if (!header.matches(':hover')) {
-        header.classList.remove('visible');
-      }
-    });
-    header.addEventListener('mouseleave', () => {
-      header.classList.remove('visible');
-    });
 
     // CSS hot-reload: check for changes every 2s
     let lastCssModified = null;

@@ -108,7 +108,7 @@ Diagonal: NE=y--,x++  SE=y++,x++  NW=y--,x--  SW=y++,x--
 Open doors: | in horizontal wall (N/S), - in vertical wall (E/W)
 Hidden exits: . or space or # in wall = possible secret door
 
-MEMORY TAGS (use lvl:N suffix for level-specific):
+MEMORY TAGS (use lvl:N suffix for level-specific, expand as needed):
   blocked,lvl:N     - "@x,y:dir" blocked moves (CHECK BEFORE MOVING!)
   frontier,lvl:N    - "@x,y:dir" unexplored directions, note ends of corridors
   searched,lvl:N    - "@x,y n:N" searched N times (stop after 3)
@@ -129,21 +129,23 @@ SAVE AS PERSISTENT RULE when:
 Format: {"scope": "persistent", "tags": "rule", "prio": 8, "content": "category: discovery"}
 
 MEMORY GUIDANCE:
-- Crucial to improve benchmark outcomes
+- "episode" memories assist with keeping info about important dungeon features even beyond compaction
 - MUST TRACK explored rooms and frontier and areas so you do not revisit them unnecessarily
 - Use to AVOID repeated actions with stable outcomes
+- "persistent" memories help with long-term learning and improvements
 - Above is guidance, but you can expand as needed within structure
 
 NETHACK ESSENTIALS:
-- Eat before Weak. Safe corpses: lichen, floating eye. Deadly: cockatrice.
+- Eat before Weak. Some safe corpses (when fresh): lichen, floating eye. Deadly: cockatrice.
 - Prayer: 800+ turn cooldown, use for emergencies.
 - Elbereth: engrave for protection (monsters won't attack).
 - HP < 30%: retreat toward stairs_up.
 - Descend when level fully explored.
+- As soon as stairs down found, descend once and ascend immediately again, to lock in lower danger level
 - Pets detect mimics; keep pet nearby. Pet only follows if adjacent when using stairs.
 - Gold is automatically picked up when moving over the tiles.
 - Stairs up from Dlvl:1 = INSTANT LOSS.
-- Monsters, items, your own glyph may overlay and thus hide dungeon features (stairs, altar, etc).
+- Monsters, items, your own glyph MAY hide dungeon features (stairs, altar, etc). Check if not found otherwise.
 - Diagonal movement often saves steps.
 - You must be DIRECTLY ADJACENT to open, kick, fight
 - "far {direction}" movement variants great for exploration if first step in that direction is possible

@@ -1,4 +1,43 @@
+<!-- Stats table - out-of-band swap to avoid flickering nav controls -->
+<div id="stats-content" hx-swap-oob="innerHTML">
+  {% if stats %}
+  <table class="stats-table">
+    <thead>
+      <tr>
+        <th>Ep</th>
+        <th>Step</th>
+        <th>LLM</th>
+        <th>In</th>
+        <th>Out</th>
+        <th>Cache</th>
+        <th>Lat</th>
+        <th>Act</th>
+        <th>Mem</th>
+        <th>Model</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>{{ stats.episode }}</td>
+        <td>{{ stats.step }}</td>
+        <td>{{ stats.llm_calls }}</td>
+        <td>{{ "{:,}".format(stats.total_in_tokens) }}</td>
+        <td>{{ "{:,}".format(stats.total_out_tokens) }}</td>
+        <td>{{ "{:,}".format(stats.cache_read_tokens) }}{% if stats.total_in_tokens %} ({{ "{:.0f}".format(100 * stats.cache_read_tokens / stats.total_in_tokens) }}%){% endif %}</td>
+        <td>{{ "{:.1f}".format(stats.avg_latency_ms / 1000) }}s</td>
+        <td>{{ stats.single_actions }}s+{{ stats.multi_actions }}m+{{ stats.queued_actions }}q</td>
+        <td>+{{ stats.episode_mem_adds }}/-{{ stats.episode_mem_removes }}e +{{ stats.persistent_mem_adds }}/-{{ stats.persistent_mem_removes }}p</td>
+        <td>{{ stats.model_id or '-' }}</td>
+      </tr>
+    </tbody>
+  </table>
+  {% else %}
+  <span class="muted">No stats</span>
+  {% endif %}
+</div>
+
 <div class="layout" data-max-step="{{ max_step }}" data-current-step="{{ current_step if current_step else '' }}">
+
   <!-- Main two-column layout -->
   <div class="main-columns">
     <!-- Left column: Screen + Memory -->
@@ -63,142 +102,72 @@
       </article>
     </div>
 
-    <!-- Right column: History + Stats (top), Response (bottom) -->
+    <!-- Right column: Live Conversation -->
     <div class="right-column">
-      <div class="right-top">
-        <article class="history-panel">
-          <header>History ({{ responses|length if responses else 0 }})</header>
-          <div class="history-list">
-            {% if responses and responses|length > 0 %}
-            <table class="history-table">
-              <thead>
-                <tr>
-                  <th class="col-step">#</th>
-                  <th class="col-action">Action</th>
-                  <th class="col-reasoning">Reasoning</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for r in responses %}
-                <tr>
-                  <td class="col-step">{{ r.step }}</td>
-                  <td class="col-action"><code>{{ r.action|default('?', true) }}</code></td>
-                  <td class="col-reasoning"><pre>{% if r.reasoning %}{{ r.reasoning }}{% else %}(no reasoning){% endif %}{% if r.compute_requests %}
----
-{% for req in r.compute_requests %}{{ req }}
-{% endfor %}{% endif %}</pre></td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-            {% else %}
-            <p class="muted">No actions yet</p>
-            {% endif %}
-          </div>
-        </article>
-
-        <article class="stats-panel">
-          <header>Stats</header>
-          {% if stats %}
-          <dl>
-            <dt>Episode</dt>
-            <dd>{{ stats.episode }}</dd>
-            <dt>Model</dt>
-            <dd>{{ stats.model_id or '-' }}</dd>
-            <dt>Step</dt>
-            <dd>{{ stats.step }}</dd>
-            <dt>LLM Calls</dt>
-            <dd>{{ stats.llm_calls }}</dd>
-            <dt>Tokens In</dt>
-            <dd>{{ "{:,}".format(stats.total_in_tokens) }}</dd>
-            <dt>Tokens Out</dt>
-            <dd>{{ "{:,}".format(stats.total_out_tokens) }}</dd>
-            <dt>Cache Read</dt>
-            <dd>{{ "{:,}".format(stats.cache_read_tokens) }}{% if stats.total_in_tokens %} ({{ "{:.0f}".format(100 * stats.cache_read_tokens / stats.total_in_tokens) }}%){% endif %}</dd>
-            <dt>Cache Create</dt>
-            <dd>{{ "{:,}".format(stats.cache_create_tokens) }}</dd>
-            <dt>Avg Latency</dt>
-            <dd>{{ "{:.1f}".format(stats.avg_latency_ms / 1000) }}s</dd>
-            <dt>Actions</dt>
-            <dd>{{ stats.single_actions }}s + {{ stats.multi_actions }}m + {{ stats.queued_actions }}q</dd>
-            <dt>Memory</dt>
-            <dd>+{{ stats.episode_mem_adds }}/-{{ stats.episode_mem_removes }}e, +{{ stats.persistent_mem_adds }}/-{{ stats.persistent_mem_removes }}p</dd>
-            <dt>Think</dt>
-            <dd>{{ stats.think_count }}/{{ stats.single_actions + stats.multi_actions }} ({{ "{:.0f}".format(100 * stats.think_count / (stats.single_actions + stats.multi_actions)) if (stats.single_actions + stats.multi_actions) else 0 }}%)</dd>
-            <dt>Compute</dt>
-            <dd>{{ stats.compute_count }}</dd>
-          </dl>
-          {% else %}
-          <p class="muted">No stats</p>
+      <article class="conversation-panel">
+        <header>
+          Conversation
+          {% if using_sdk and sdk_prompt %}
+          (SDK, step {{ sdk_prompt.step }}, {{ sdk_prompt.history|length }} msgs)
+          {% elif full_prompt %}
+          (step {{ full_prompt.step }}, {{ full_prompt.messages|length }} msgs)
           {% endif %}
-        </article>
-      </div>
-
-      <article class="response-panel">
-        <header>Response{% if full_response %} ({{ full_response.in_tok }}/{{ full_response.out_tok }} tok){% endif %}</header>
-        <div class="debug-content">
-          {% if full_response %}
-          {% if full_response.extended_thinking %}
-          <div class="debug-message debug-role-thinking">
-            <div class="debug-role">extended thinking</div>
+          {% if full_response %} · {{ full_response.in_tok }}/{{ full_response.out_tok }} tok{% endif %}
+        </header>
+        <div class="conversation-content">
+          {% if using_sdk and sdk_prompt %}
+          <!-- SDK: Show latest turn prominently, then history newest-first -->
+          <div class="conv-turn conv-latest">
+            <div class="conv-msg conv-assistant">
+              <span class="conv-role">← assistant</span>
+              {% if full_response and full_response.extended_thinking %}
+              <details class="conv-thinking">
+                <summary>thinking...</summary>
+                <pre>{{ full_response.extended_thinking }}</pre>
+              </details>
+              {% endif %}
+              <pre>{{ sdk_prompt.received }}</pre>
+            </div>
+            <div class="conv-msg conv-user">
+              <span class="conv-role">→ sent</span>
+              <pre>{{ sdk_prompt.sent }}</pre>
+            </div>
+          </div>
+          {% if sdk_prompt.history|length > 2 %}
+          <div class="conv-separator">── previous turns ──</div>
+          {% for msg in sdk_prompt.history[2:] %}
+          <div class="conv-msg conv-{{ msg.role }}">
+            <span class="conv-role">{{ msg.role }}</span>
+            <pre>{{ msg.content }}</pre>
+          </div>
+          {% endfor %}
+          {% endif %}
+          {% elif full_prompt and full_prompt.messages %}
+          <!-- Traditional: Show messages, newest at top -->
+          {% if full_response and full_response.extended_thinking %}
+          <div class="conv-msg conv-thinking">
+            <span class="conv-role">thinking</span>
             <pre>{{ full_response.extended_thinking }}</pre>
           </div>
           {% endif %}
-          {% if full_response.raw_completion %}
-          <div class="debug-message debug-role-assistant">
-            <div class="debug-role">raw completion</div>
+          {% if full_response and full_response.raw_completion %}
+          <div class="conv-msg conv-assistant conv-latest-single">
+            <span class="conv-role">← assistant (latest)</span>
             <pre>{{ full_response.raw_completion }}</pre>
           </div>
           {% endif %}
+          <div class="conv-separator">── prompt ──</div>
+          {% for msg in full_prompt.messages|reverse %}
+          <div class="conv-msg conv-{{ msg.role }}">
+            <span class="conv-role">{{ msg.role }}</span>
+            <pre>{{ msg.content }}</pre>
+          </div>
+          {% endfor %}
           {% else %}
-          <p class="muted">No response yet</p>
+          <p class="muted">No conversation yet</p>
           {% endif %}
         </div>
       </article>
     </div>
   </div>
-
-  <!-- Debug: Prompt Panel -->
-  <article class="prompt-panel">
-    {% if using_sdk and sdk_prompt %}
-    <!-- SDK Incremental View: newest messages first -->
-    <header>SDK Conversation (step {{ sdk_prompt.step }}, {{ sdk_prompt.history|length }} messages, newest first)</header>
-    <div class="debug-content">
-      <!-- Latest turn highlighted -->
-      <div class="debug-message debug-role-assistant debug-latest">
-        <div class="debug-role">LATEST ← assistant</div>
-        <pre>{{ sdk_prompt.received }}</pre>
-      </div>
-      <div class="debug-message debug-role-user debug-latest">
-        <div class="debug-role">LATEST ← user (sent)</div>
-        <pre>{{ sdk_prompt.sent }}</pre>
-      </div>
-      <!-- Full history (already newest-first) -->
-      {% if sdk_prompt.history|length > 2 %}
-      <div class="debug-history-separator">── previous turns ──</div>
-      {% for msg in sdk_prompt.history[2:] %}
-      <div class="debug-message debug-role-{{ msg.role }}">
-        <div class="debug-role">{{ msg.role }}</div>
-        <pre>{{ msg.content }}</pre>
-      </div>
-      {% endfor %}
-      {% endif %}
-    </div>
-    {% else %}
-    <!-- Traditional full prompt view -->
-    <header>Full Prompt{% if full_prompt %} (step {{ full_prompt.step }}, {{ full_prompt.messages|length }} messages){% endif %}</header>
-    <div class="debug-content">
-      {% if full_prompt and full_prompt.messages %}
-      {% for msg in full_prompt.messages %}
-      <div class="debug-message debug-role-{{ msg.role }}">
-        <div class="debug-role">{{ msg.role }}</div>
-        <pre>{{ msg.content }}</pre>
-      </div>
-      {% endfor %}
-      {% else %}
-      <p class="muted">No prompt logged (enable log_full_prompt in config)</p>
-      {% endif %}
-    </div>
-    {% endif %}
-  </article>
 </div>
