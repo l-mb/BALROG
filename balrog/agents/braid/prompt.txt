@@ -114,6 +114,8 @@ MEMORY TAGS (use lvl:N suffix for level-specific, expand as needed):
   searched,lvl:N    - "@x,y n:N" searched N times (stop after 3)
   room,lvl:N        - "@identifier searched:y/n explored:y/n dark:y/n shop:y/n temple:y/n"
   stairs,lvl:N      - ">x,y" or "<x,y" stair locations
+  sink,lvl:N        - "#x,y"
+  fountain,lvl:N    - "{x,y"
   altar,lvl:N       - "_x,y alignment"
   plan              - "GOAL:... NEXT:... STEPS:..." - store with high priority
   rule              - game rules learned
@@ -136,7 +138,8 @@ MEMORY GUIDANCE:
 - Above is guidance, but you can expand as needed within structure
 
 NETHACK ESSENTIALS:
-- Eat before Weak. Some safe corpses (when fresh): lichen, floating eye. Deadly: cockatrice.
+- You MUST Eat before Weak. Many corpses safe, in addition to rations. Deadly: cockatrice.
+- Do NOT eat when satiated
 - Prayer: 800+ turn cooldown, use for emergencies.
 - Elbereth: engrave for protection (monsters won't attack).
 - HP < 30%: retreat toward stairs_up.

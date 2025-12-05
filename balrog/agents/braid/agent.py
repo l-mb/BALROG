@@ -518,20 +518,58 @@ class BRAIDAgent(BaseAgent):
     # --- Multi-action queue support ---
 
     def _is_interactive_prompt(self, text: str) -> bool:
-        """Detect if game is waiting for specific input (not a queued action)."""
-        # Choice brackets at end of message: [abc or ?*], [yn], [ynq], etc.
-        if re.search(r"\[[a-zA-Z0-9\s\?\*\-]+\]\s*$", text):
-            return True
-        # Direction prompt
+        """Detect if game is waiting for specific input (not a queued action).
+
+        Returns True only if the prompt requires input that can't be satisfied
+        by the next queued action.
+        """
+        if not self._action_queue:
+            # No queued actions - any interactive prompt needs LLM input
+            if "In what direction" in text:
+                return True
+            if re.search(r"\[[a-zA-Z0-9\s\?\*\-]+\]\s*$", text):
+                return True
+            if "How many" in text:
+                return True
+            if re.search(r"(Really|Are you sure|Continue)\s*\?", text, re.IGNORECASE):
+                return True
+            return False
+
+        next_action = self._action_queue[0]
+
+        # Direction prompt - check if next queued action is a direction
         if "In what direction" in text:
+            return not self._is_direction(next_action)
+
+        # Choice brackets at end of message: [abc or ?*], [yn], [ynq], etc.
+        # This handles inventory selection, yes/no prompts, etc.
+        bracket_match = re.search(r"\[([a-zA-Z0-9\s\?\*\-]+)\]\s*$", text)
+        if bracket_match:
+            # Single letter/character queued actions are valid responses
+            # (inventory letters, menu choices, y/n)
+            if len(next_action) == 1:
+                return False  # Let queue continue with single-char response
             return True
+
         # Quantity prompt
         if "How many" in text:
-            return True
-        # Confirmation questions
+            return not next_action.isdigit()
+
+        # Confirmation questions without brackets
         if re.search(r"(Really|Are you sure|Continue)\s*\?", text, re.IGNORECASE):
-            return True
+            return next_action.lower() not in ("y", "n", "yes", "no")
+
         return False
+
+    def _is_direction(self, action: str) -> bool:
+        """Check if action is a valid direction."""
+        directions = {
+            "north", "south", "east", "west",
+            "northeast", "northwest", "southeast", "southwest",
+            "n", "s", "e", "w", "ne", "nw", "se", "sw",
+            "up", "down", ".", ">", "<"
+        }
+        return action.lower() in directions
 
     def _should_abort_queue(self, obs: dict[str, Any]) -> bool:
         """Check if action queue should be aborted based on observation."""
