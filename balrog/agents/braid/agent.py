@@ -860,4 +860,4 @@ class BRAIDAgent(BaseAgent):
         self._last_glyphs = None
         self._last_extended_thinking = None
         self._recent_actions.clear()
-        self.storage.log_reset(self.episode_number)
+        self.storage.log_reset(self.episode_number, str(self.config.client.model_id))

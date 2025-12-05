@@ -159,6 +159,7 @@ class NLELanguageWrapper(language_wrapper.NLELanguageWrapper):
             "text_cursor": self.nle_language.text_cursor(glyphs, blstats, tty_cursor).decode("latin-1"),
             "tty_chars": nle_obsv["tty_chars"],
             "tty_cursor": nle_obsv["tty_cursor"],
+            "blstats": blstats,
         }
 
     def render_text(self, nle_obsv):

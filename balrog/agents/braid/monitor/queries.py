@@ -17,6 +17,7 @@ class AgentInfo:
 class AgentStats:
     episode: int
     step: int
+    model_id: str | None
     total_in_tokens: int
     total_out_tokens: int
     avg_latency_ms: float
@@ -261,9 +262,18 @@ class MonitorDB:
                FROM journal WHERE worker_id = ? AND event = 'memory'""",
             (worker_id,),
         ).fetchone()
+        # Model ID from latest reset event
+        reset = self.conn.execute(
+            """SELECT json_extract(data, '$.model_id') as model_id
+               FROM journal WHERE worker_id = ? AND event = 'reset'
+               ORDER BY id DESC LIMIT 1""",
+            (worker_id,),
+        ).fetchone()
+        model_id = reset["model_id"] if reset else None
         return AgentStats(
             episode=resp["episode"] or 0,
             step=resp["step"] or 0,
+            model_id=model_id,
             total_in_tokens=int(resp["total_in"] or 0),
             total_out_tokens=int(resp["total_out"] or 0),
             avg_latency_ms=float(resp["avg_latency"] or 0),

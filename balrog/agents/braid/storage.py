@@ -268,8 +268,9 @@ class BraidStorage:
         )
         self.conn.commit()
 
-    def log_reset(self, episode: int) -> None:
-        self._log(episode, 0, "reset")
+    def log_reset(self, episode: int, model_id: str | None = None) -> None:
+        data = {"model_id": model_id} if model_id else None
+        self._log(episode, 0, "reset", data)
 
     def log_request(
         self,
