@@ -202,6 +202,8 @@ ACTION LOG (tag: "actlog", prio: 8):
     "T16:east @5,3->@8,3 ok" (moved 3 tiles)
     "T17:search @8,3->@8,3 found_door_N"
     "T18:farnorth @8,3->@8,1 ok"
+  TURN TRACKING: Failed/blocked actions do NOT advance the game turn.
+  Always read T from [STATUS] - don't assume +1 per action.
   If from==to after move command, it was blocked - add to "blocked" tag!
   Keep last 5-10 entries. Remove stale ones.
 

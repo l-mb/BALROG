@@ -103,6 +103,9 @@ class BRAIDAgent(BaseAgent):
         self._recent_actions: list[str] = []
         self._max_recent_actions = 10
 
+        # Current game turn (from blstats) for correcting actlog entries
+        self._current_game_turn: int | None = None
+
     def build_system_prompt(self, env_instruction: str) -> str:
         """Append BRAID response format instructions to environment prompt."""
         return f"{env_instruction}\n\n{self._SYSTEM_PROMPT_SUFFIX}"
@@ -209,6 +212,7 @@ class BRAIDAgent(BaseAgent):
         blstats = raw_obs.get("blstats") if isinstance(raw_obs, dict) else None
         if blstats is not None:
             from .compute.navigation import format_status
+            self._current_game_turn = int(blstats[20])
             sections.append(f"[STATUS] {format_status(blstats)}")
 
         p_entries = self.storage.retrieve(
@@ -760,6 +764,10 @@ class BRAIDAgent(BaseAgent):
                     content = item.get("content", "")
                     scope_str = item.get("scope", "persistent").lower()
                     prio = max(1, min(9, int(item.get("prio", 5))))
+
+                    # Auto-correct turn in actlog entries (LLM often gets it wrong)
+                    if "actlog" in tags and self._current_game_turn is not None:
+                        content = re.sub(r"^T\d+:", f"T{self._current_game_turn}:", content)
 
                     if not tags or not content:
                         continue
