@@ -119,6 +119,7 @@ Use enable_tags/disable_tags to filter. Max 256 chars per entry. Remove stale en
 
 SAVE AS PERSISTENT RULE when:
 - Game mechanic surprises you
+- You discover a clarification on how to use an action, helper
 - Strategy works or fails consistently
 - Discover monster/item property
 - When not yet sure about long-term value, save as "episode" rule first, promote later
@@ -139,6 +140,7 @@ NETHACK ESSENTIALS:
 - Stairs up from Dlvl:1 = INSTANT LOSS.
 - Monsters, items, your own glyph may overlay and thus hide dungeon features (stairs, altar, etc).
 - Diagonal movement often saves steps.
+- You must be DIRECTLY ADJACENT to open, kick, fight
 - "far {direction}" movement variants great for exploration if first step in that direction is possible
 
 ACTION LOG (tag: "actlog", prio: 8):
