@@ -274,8 +274,13 @@ class BRAIDAgent(BaseAgent):
         response = self.client.generate(messages)
 
         # Get pending actions from tools (auto_explore, game_action populate these)
-        tool_actions = get_pending_actions()
-        if tool_actions:
+        # Returns (actions, error_message) - error_message is set if multiple action tools called
+        tool_actions, action_error = get_pending_actions()
+        if action_error:
+            # Multiple action tools called - reject all, notify on next turn
+            self._queue_abort_msg = action_error
+            logger.warning(f"Multiple action tools violation: {action_error}")
+        elif tool_actions:
             self._action_queue.extend(tool_actions)
             if not self._batch_source:
                 self._batch_source = "tool_action"

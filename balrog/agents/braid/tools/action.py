@@ -12,6 +12,20 @@ from claude_agent_sdk import tool
 # Action queue for game actions - picked up by agent after tool execution
 _pending_actions: list[str] = []
 
+# Track which action tools were called this turn (for multi-action detection)
+_action_tools_called: list[str] = []
+
+
+def clear_action_tool_tracking() -> None:
+    """Clear action tool tracking for new turn."""
+    global _action_tools_called
+    _action_tools_called = []
+
+
+def get_action_tools_called() -> list[str]:
+    """Get list of action tools called this turn."""
+    return _action_tools_called.copy()
+
 
 def get_pending_actions() -> list[str]:
     """Get and clear pending actions from game_action tool."""
@@ -85,7 +99,9 @@ def expand_action(action: str) -> list[str]:
 )
 async def game_action(args: dict[str, Any]) -> dict[str, Any]:
     """Execute game action(s)."""
-    global _pending_actions
+    global _pending_actions, _action_tools_called
+
+    _action_tools_called.append("game_action")
 
     actions_input = args.get("actions", [])
 

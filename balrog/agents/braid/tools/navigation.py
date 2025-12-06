@@ -25,6 +25,9 @@ _dlvl: int = 1
 # Action queue for auto-exploration - picked up by agent after tool execution
 _pending_actions: list[str] = []
 
+# Track which action tools were called this turn (for multi-action detection)
+_action_tools_called: list[str] = []
+
 
 def set_context(obs: dict[str, Any], storage: BraidStorage, episode: int) -> None:
     """Set context for navigation tools. Called by agent before generate()."""
@@ -39,6 +42,17 @@ def set_context(obs: dict[str, Any], storage: BraidStorage, episode: int) -> Non
             blstats = raw_obs.get("blstats", obs.get("blstats"))
             if blstats is not None:
                 _dlvl = int(blstats[12])
+
+
+def clear_action_tool_tracking() -> None:
+    """Clear action tool tracking for new turn."""
+    global _action_tools_called
+    _action_tools_called = []
+
+
+def get_action_tools_called() -> list[str]:
+    """Get list of action tools called this turn."""
+    return _action_tools_called.copy()
 
 
 def get_pending_actions() -> list[str]:
@@ -227,8 +241,10 @@ async def navigate(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def travel_to(args: dict[str, Any]) -> dict[str, Any]:
     """Queue travel to a specific coordinate."""
-    global _pending_actions
+    global _pending_actions, _action_tools_called
     import re
+
+    _action_tools_called.append("travel_to")
 
     obs_data = _get_obs_data()
     if obs_data is None:
@@ -278,7 +294,9 @@ async def travel_to(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def travel(args: dict[str, Any]) -> dict[str, Any]:
     """Queue directional travel."""
-    global _pending_actions
+    global _pending_actions, _action_tools_called
+
+    _action_tools_called.append("travel")
 
     obs_data = _get_obs_data()
     if obs_data is None:
@@ -328,7 +346,9 @@ async def travel(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def auto_explore(args: dict[str, Any]) -> dict[str, Any]:
     """Queue exploration actions for room or corridor."""
-    global _pending_actions
+    global _pending_actions, _action_tools_called
+
+    _action_tools_called.append("auto_explore")
 
     obs_data = _get_obs_data()
     if obs_data is None:
