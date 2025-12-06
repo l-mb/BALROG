@@ -143,7 +143,7 @@ DECISION TREE - FOLLOW EVERY TURN:
    ├── Corridor unexplored → auto_explore(mode="corridor")
    ├── Returns "FULLY EXPLORED" → memory_add it as explored
    ├── At junction → pick unexplored branch
-   └── Dead end → game_action("search") 3x, backtrack
+   └── Dead end → game_action("search") 3x, backtrack, memorize so you do not retry
 
    Next to closed door (+)?
    ├── Closed → game_action("open north") etc

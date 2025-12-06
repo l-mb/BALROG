@@ -235,7 +235,7 @@ class MonitorDB:
         return result
 
     def is_using_sdk(self, worker_id: str) -> bool:
-        """Check if agent is using claude-sdk (has sdk_prompt events)."""
+        """Check if agent is using claude-tools (has sdk_prompt events)."""
         row = self.conn.execute(
             """SELECT 1 FROM journal WHERE worker_id = ? AND event = 'sdk_prompt' LIMIT 1""",
             (worker_id,),

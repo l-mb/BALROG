@@ -843,7 +843,7 @@ class BRAIDAgent(BaseAgent):
     def on_episode_end(self) -> None:
         """Called when episode ends - close SDK session if active.
 
-        This allows ClaudeSDKWrapper to close its session and start fresh
+        This allows ClaudeToolWrapper to close its session and start fresh
         for the next episode, maintaining clean context boundaries.
         """
         if hasattr(self.client, "close_session"):
