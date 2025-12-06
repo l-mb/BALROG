@@ -337,8 +337,36 @@ def _direction_from(px: int, py: int, tx: int, ty: int) -> str:
     return ns + ew if ns or ew else "here"
 
 
+def _is_corridor_tile(glyphs: np.ndarray, x: int, y: int) -> bool:
+    """Check if tile is a corridor (not room floor)."""
+    rows, cols = glyphs.shape
+    if not (0 <= y < rows and 0 <= x < cols):
+        return False
+    cmap_idx = int(glyphs[y, x]) - CMAP_OFF
+    return cmap_idx in CORRIDOR_CMAP  # 21, 22 = corridor, lit corridor
+
+
+def _count_adjacent_floor(glyphs: np.ndarray, x: int, y: int) -> int:
+    """Count adjacent floor/corridor tiles (indicates if in room vs corridor)."""
+    rows, cols = glyphs.shape
+    count = 0
+    for dy, dx in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+        ny, nx = y + dy, x + dx
+        if 0 <= ny < rows and 0 <= nx < cols:
+            cmap_idx = int(glyphs[ny, nx]) - CMAP_OFF
+            if cmap_idx in WALKABLE_CMAP:
+                count += 1
+    return count
+
+
 def find_unexplored(glyphs: np.ndarray, pos: tuple[int, int]) -> str:
-    """Find exploration frontiers - walkable tiles adjacent to unexplored areas.
+    """Find exploration frontiers - places where unexplored areas can be reached.
+
+    Only reports TRUE frontiers:
+    - Corridor tiles (# characters) adjacent to unexplored stone (any direction)
+
+    Does NOT report:
+    - Room floor tiles (walls around rooms aren't explorable)
 
     Args:
         glyphs: 2D glyph array from observation
@@ -352,27 +380,40 @@ def find_unexplored(glyphs: np.ndarray, pos: tuple[int, int]) -> str:
     rows, cols = glyphs.shape
     frontiers: list[tuple[int, int, str, int]] = []  # (x, y, unexplored_dirs, distance)
 
+    # All 8 directions - corridors can connect diagonally
+    all_dirs = {
+        "N": (-1, 0), "S": (1, 0), "E": (0, 1), "W": (0, -1),
+        "NE": (-1, 1), "NW": (-1, -1), "SE": (1, 1), "SW": (1, -1),
+    }
+
     # Check each walkable tile for adjacent unexplored (stone) tiles
     for row in range(rows):
         for col in range(cols):
             if not walkable[row, col]:
                 continue
 
+            # Only corridor tiles are true frontiers
+            # Room floor tiles adjacent to stone are just walls, not exploration opportunities
+            if not _is_corridor_tile(glyphs, col, row):
+                continue
+
             # Check all 8 neighbors for unexplored tiles
             unexplored_dirs = []
-            for dir_name, (dy, dx) in DIRS.items():
+            for dir_name, (dy, dx) in all_dirs.items():
                 ny, nx = row + dy, col + dx
                 if 0 <= ny < rows and 0 <= nx < cols:
                     if glyphs[ny, nx] == S_STONE:
-                        unexplored_dirs.append(dir_name[:1].upper())  # N, S, E, W, etc.
+                        unexplored_dirs.append(dir_name)
 
-            if unexplored_dirs:
-                d = distance(px, py, col, row)
-                dirs_str = "".join(sorted(set(unexplored_dirs)))
-                frontiers.append((col, row, dirs_str, d))
+            if not unexplored_dirs:
+                continue
+
+            d = distance(px, py, col, row)
+            dirs_str = ",".join(sorted(unexplored_dirs))
+            frontiers.append((col, row, dirs_str, d))
 
     if not frontiers:
-        return "FULLY EXPLORED - no unexplored areas visible. Search walls for secret doors or use stairs."
+        return "FULLY EXPLORED - no unexplored corridor endpoints. Search walls for secret doors or use stairs."
 
     # Sort by distance
     frontiers.sort(key=lambda f: f[3])

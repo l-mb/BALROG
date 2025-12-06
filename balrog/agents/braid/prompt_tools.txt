@@ -39,10 +39,11 @@ MEMORY TOOLS:
 MEMORY EXAMPLES:
 
 Recording discoveries (episode-scoped):
-  memory_add("stairs down at @45,12", "episode", "stairs,lvl:1", 7)
-  memory_add("room @30,8 explored, has fountain", "episode", "room,lvl:1", 5)
-  memory_add("corridor @20,5-20,15 fully explored", "episode", "corridor,lvl:1", 4)
+  memory_add("stairs down at @45,12 to:dungeon/mines/...", "episode", "stairs,lvl:1", 7)
+  memory_add("room @30,8 explored:y/n temple:y/n shop:y/n ...", "episode", "room,lvl:1", 5)
+  memory_add("altar @33,10 lawful", "episode", "altar,lvl:3", 4)
   memory_add("blocked: @22,10 east is wall", "episode", "blocked,lvl:1", 6)
+  Expand as needed for effective dungeon navigation.
 
 Recording rules (persistent across games):
   memory_add("floating eye: don't melee, use ranged", "persistent", "rule,monster", 8)
@@ -57,13 +58,6 @@ Searching memory:
   memory_search("", "rule", "persistent", 20)     → get all persistent rules/learnings
   memory_search("", "", "persistent", 50)         → get ALL persistent memories
   memory_search("room", "temple:y", "episode", 10) → find temples found during this episode
-
-EXAMPLE MEMORY TAGS (use lvl:N suffix for level-specific):
-  blocked,lvl:N     - "@x,y:dir" blocked moves (CHECK BEFORE MOVING!)
-  room,lvl:N        - "@identifier explored:y/n dark:y/n shop:y/n temple:y/n"
-  stairs,lvl:N      - ">x,y" (down) or "<x,y" (up) stair locations
-  rule              - game rules learned
-  You can add/create arbitrary memory tags as needed.
 
 ---
 
@@ -133,6 +127,7 @@ GAME ACTION TOOL:
     game_action("far north")     # move north until blocked/event
     game_action("far southeast") # move diagonally until blocked
     Stops on: wall, monster, item, door, branching corridor, trap
+    Downside: somewhat uncertain end position, use carefully and observe state change
     USE travel_to() tool INSTEAD when you know exact target coordinates
 
 ---
@@ -176,9 +171,9 @@ DECISION TREE - FOLLOW EVERY TURN:
 
 ---
 
-FAILURE RECOVERY:
+ACTION FAILURE RECOVERY:
+  Carefully ensure you're in the correct position for the action you attempted
   "no path" → door blocking? open it. Manual moves around or through obstacle. Your pet or a monster could be in the way.
-  "NOT IN ROOM" → use game_action("far <direction>") to explore corridor, be aware of limitations!
   Blocked repeatedly by pet to destination → try walking around or through it
   Stuck 3+ turns → try different direction
 
@@ -229,8 +224,10 @@ PLAN WHEN YOU CANNOT FIND STAIRS:
 - Escalate to meticulously detailed level of planning
 - Use scan("unexplored") to find ALL frontiers, then travel_to each
 - Mark every apparent deadend corridor (# tiles that just end) as a TODO
-- Search dead ends multiple times (hidden doors are stubborn!)
+- Plan to search and explore every existing room three times explicitly
+- Search dead ends multiple times (hidden passages are stubborn!)
 - Visit and Search all these spots systematically
+- As a final resort, restart search for the entire level
 
 ---
 
@@ -238,8 +235,7 @@ LANGUAGE/STYLE:
 
 Optimize thinking and memories for LLM/agent use
 Abbreviate freely
-Ignore natural language, grammar, spelling
-Maximize signal
+Ignore language choice, grammar, spelling, if it reduces tokens while retaining signal
 
 ---
 
