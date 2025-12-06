@@ -99,16 +99,19 @@ async def memory_remove(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "memory_search",
-    "Search memory entries by content and/or tags. Returns matching entries with IDs.",
-    {"query": str, "tags": str, "limit": int},
+    "Search memory entries by content, tags, and/or scope. Returns matching entries with IDs.",
+    {"query": str, "tags": str, "scope": str, "limit": int},
 )
 async def memory_search(args: dict[str, Any]) -> dict[str, Any]:
-    """Search memory entries by content and/or tags."""
+    """Search memory entries by content, tags, and/or scope."""
     if _storage is None:
         return {"content": [{"type": "text", "text": "ERROR: Storage not initialized"}], "is_error": True}
 
+    from ..storage import MemoryScope
+
     query = args.get("query", "")
     tags_str = args.get("tags", "")
+    scope_str = args.get("scope", "")
     limit = args.get("limit", 10)
 
     # Parse tags filter
@@ -116,11 +119,35 @@ async def memory_search(args: dict[str, Any]) -> dict[str, Any]:
     if tags_str:
         filter_tags = {t.strip() for t in tags_str.split(",") if t.strip()}
 
-    results = _storage.search(query, tags=filter_tags, limit=limit)
+    # Parse scope filter
+    scope: MemoryScope | None = None
+    if scope_str:
+        scope_str = scope_str.lower()
+        if scope_str == "episode":
+            scope = MemoryScope.EPISODE
+        elif scope_str == "persistent":
+            scope = MemoryScope.PERSISTENT
+        elif scope_str:
+            return {
+                "content": [{"type": "text", "text": f"ERROR: Invalid scope '{scope_str}'. Use 'episode', 'persistent', or '' for all"}],
+                "is_error": True,
+            }
+
+    # For episode scope, filter to current episode
+    episode = _episode_number if scope == MemoryScope.EPISODE else None
+
+    results = _storage.search(query, tags=filter_tags, scope=scope, episode=episode, limit=limit)
 
     if not results:
-        filter_desc = f" with tags '{tags_str}'" if tags_str else ""
-        return {"content": [{"type": "text", "text": f"No matches for '{query}'{filter_desc}"}]}
+        filter_parts = []
+        if query:
+            filter_parts.append(f"query='{query}'")
+        if tags_str:
+            filter_parts.append(f"tags='{tags_str}'")
+        if scope_str:
+            filter_parts.append(f"scope='{scope_str}'")
+        filter_desc = f" ({', '.join(filter_parts)})" if filter_parts else ""
+        return {"content": [{"type": "text", "text": f"No matches{filter_desc}"}]}
 
     lines = [f"[{e.entry_id}] ({e.scope.value}, {e.tags}) {e.content}" for e in results]
     return {"content": [{"type": "text", "text": f"Found {len(results)}:\n" + "\n".join(lines)}]}

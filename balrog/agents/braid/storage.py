@@ -262,9 +262,14 @@ class BraidStorage:
         return cursor.rowcount > 0
 
     def search(
-        self, query: str, tags: set[str] | None = None, limit: int = 10
+        self,
+        query: str,
+        tags: set[str] | None = None,
+        scope: MemoryScope | None = None,
+        episode: int | None = None,
+        limit: int = 10,
     ) -> list[MemoryEntry]:
-        """Search memory by content substring and optional tags filter."""
+        """Search memory by content substring and optional filters."""
         query_lower = query.lower() if query else ""
         conditions = ["deleted = 0"]
         params: list[str | int] = []
@@ -273,7 +278,15 @@ class BraidStorage:
             conditions.append("LOWER(content) LIKE ?")
             params.append(f"%{query_lower}%")
 
-        sql = f"SELECT * FROM memory WHERE {' AND '.join(conditions)} LIMIT ?"
+        if scope is not None:
+            conditions.append("scope = ?")
+            params.append(scope.value)
+
+        if episode is not None:
+            conditions.append("(scope != 'episode' OR source_episode = ?)")
+            params.append(episode)
+
+        sql = f"SELECT * FROM memory WHERE {' AND '.join(conditions)} ORDER BY priority DESC LIMIT ?"
         params.append(limit)
 
         rows = self.conn.execute(sql, params).fetchall()

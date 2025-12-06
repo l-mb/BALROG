@@ -218,17 +218,116 @@ async def navigate(args: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(
-    "auto_explore",
-    "Queue exploration or travel actions. Mode: room (explore current room), corridor (explore corridor), "
-    "travel_to (path to coordinates), travel (move in direction). Actions execute automatically.",
+    "travel_to",
+    "Queue movement to a specific location. Pathfinds and queues all moves automatically. "
+    "Aborts on combat, HP drop, or hunger.",
     {
-        "mode": str,  # "room", "corridor", "travel_to", "travel"
-        "target": str,  # "@x,y" or "north 5" or "" for room/corridor
-        "cautious": bool,  # abort on discovery
+        "target": str,  # "@x,y" absolute or "+dx,dy" relative
+    },
+)
+async def travel_to(args: dict[str, Any]) -> dict[str, Any]:
+    """Queue travel to a specific coordinate."""
+    global _pending_actions
+    import re
+
+    obs_data = _get_obs_data()
+    if obs_data is None:
+        return {"content": [{"type": "text", "text": "ERROR: No observation available"}], "is_error": True}
+
+    glyphs, _tty_chars, _blstats, pos = obs_data
+    target = args.get("target", "")
+    visited = _get_visited()
+
+    from ..compute.navigation import find_monster_positions, pathfind
+
+    extra_walkable = visited | find_monster_positions(glyphs) | {pos}
+
+    # Parse "@x,y" or "+dx,dy" (relative)
+    abs_match = re.match(r"@?(\d+),(\d+)$", target.strip())
+    rel_match = re.match(r"([+-]?\d+),([+-]?\d+)$", target.strip())
+
+    if abs_match:
+        gx, gy = map(int, abs_match.groups())
+    elif rel_match:
+        dx, dy = map(int, rel_match.groups())
+        gx, gy = pos[0] + dx, pos[1] + dy
+    else:
+        return {
+            "content": [{"type": "text", "text": "ERROR: travel_to format: @x,y or +dx,dy"}],
+            "is_error": True,
+        }
+
+    path = pathfind(glyphs, pos, (gx, gy), extra_walkable)
+    if path is None:
+        return {"content": [{"type": "text", "text": f"travel_to @{gx},{gy}: NO PATH"}]}
+    if not path:
+        return {"content": [{"type": "text", "text": f"travel_to @{gx},{gy}: ALREADY THERE"}]}
+
+    _pending_actions = path
+    return {"content": [{"type": "text", "text": f"travel_to @{gx},{gy}: EXECUTING {len(path)} moves"}]}
+
+
+@tool(
+    "travel",
+    "Queue movement in a direction for N steps. Faster than repeated game_action calls. "
+    "Aborts on combat, HP drop, or hunger.",
+    {
+        "direction": str,  # "north", "NE", etc.
+        "count": int,  # number of steps
+    },
+)
+async def travel(args: dict[str, Any]) -> dict[str, Any]:
+    """Queue directional travel."""
+    global _pending_actions
+
+    obs_data = _get_obs_data()
+    if obs_data is None:
+        return {"content": [{"type": "text", "text": "ERROR: No observation available"}], "is_error": True}
+
+    dir_name = args.get("direction", "").lower()
+    count = args.get("count", 1)
+
+    if count < 1:
+        return {"content": [{"type": "text", "text": "ERROR: count must be >= 1"}], "is_error": True}
+
+    # Normalize direction
+    dir_map = {
+        "n": "north",
+        "s": "south",
+        "e": "east",
+        "w": "west",
+        "ne": "northeast",
+        "nw": "northwest",
+        "se": "southeast",
+        "sw": "southwest",
+    }
+    if dir_name in dir_map:
+        dir_name = dir_map[dir_name]
+
+    from ..compute.navigation import DIRS
+
+    if dir_name not in DIRS:
+        return {
+            "content": [{"type": "text", "text": f"ERROR: Unknown direction '{dir_name}'. Use: north, south, east, west, northeast, northwest, southeast, southwest"}],
+            "is_error": True,
+        }
+
+    actions = [dir_name] * count
+    _pending_actions = actions
+    return {"content": [{"type": "text", "text": f"travel {dir_name} {count}: EXECUTING {count} moves"}]}
+
+
+@tool(
+    "auto_explore",
+    "Queue exploration actions for current room or corridor. Automatically walks to all reachable tiles. "
+    "Aborts on combat, HP drop, or hunger.",
+    {
+        "mode": str,  # "room" or "corridor"
+        "cautious": bool,  # abort on new tile discovery (for secret door hunting)
     },
 )
 async def auto_explore(args: dict[str, Any]) -> dict[str, Any]:
-    """Queue exploration or travel actions."""
+    """Queue exploration actions for room or corridor."""
     global _pending_actions
 
     obs_data = _get_obs_data()
@@ -237,7 +336,6 @@ async def auto_explore(args: dict[str, Any]) -> dict[str, Any]:
 
     glyphs, _tty_chars, _blstats, pos = obs_data
     mode = args.get("mode", "").lower()
-    target = args.get("target", "")
     cautious = args.get("cautious", False)
 
     visited = _get_visited()
@@ -245,112 +343,40 @@ async def auto_explore(args: dict[str, Any]) -> dict[str, Any]:
     from ..compute.navigation import (
         detect_corridor,
         detect_room,
-        find_monster_positions,
-        pathfind,
         plan_corridor_exploration,
         plan_room_exploration,
     )
 
-    extra_walkable = visited | find_monster_positions(glyphs) | {pos}
-
     if mode == "room":
         room_tiles = detect_room(glyphs, pos)
         if room_tiles is None:
-            return {"content": [{"type": "text", "text": "auto_explore room: NOT IN ROOM"}]}
+            return {"content": [{"type": "text", "text": "auto_explore room: NOT IN ROOM (try mode='corridor')"}]}
 
         actions = plan_room_exploration(glyphs, room_tiles, pos, visited)
         if not actions:
-            return {"content": [{"type": "text", "text": "auto_explore room: FULLY EXPLORED (all tiles visited) - memorize this room as explored"}]}
+            return {"content": [{"type": "text", "text": "auto_explore room: FULLY EXPLORED - memorize this room as explored"}]}
 
-        # Limit actions
         actions = actions[:100]
         _pending_actions = actions
-        mode_suffix = ":cautious" if cautious else ""
-        return {"content": [{"type": "text", "text": f"auto_explore room{mode_suffix}: EXECUTING {len(actions)} actions (auto)"}]}
+        mode_suffix = " (cautious)" if cautious else ""
+        return {"content": [{"type": "text", "text": f"auto_explore room{mode_suffix}: EXECUTING {len(actions)} actions"}]}
 
     elif mode == "corridor":
         corridor = detect_corridor(glyphs, pos)
         if corridor is None:
-            return {"content": [{"type": "text", "text": "auto_explore corridor: NOT IN CORRIDOR"}]}
+            return {"content": [{"type": "text", "text": "auto_explore corridor: NOT IN CORRIDOR (try mode='room')"}]}
 
         actions = plan_corridor_exploration(glyphs, corridor, pos, visited)
         if not actions:
-            return {"content": [{"type": "text", "text": "auto_explore corridor: FULLY EXPLORED (all tiles visited, no unexplored branches) - memorize this corridor as explored"}]}
+            return {"content": [{"type": "text", "text": "auto_explore corridor: FULLY EXPLORED - memorize this corridor as explored"}]}
 
         actions = actions[:100]
         _pending_actions = actions
-        mode_suffix = ":cautious" if cautious else ""
-        return {"content": [{"type": "text", "text": f"auto_explore corridor{mode_suffix}: EXECUTING {len(actions)} actions (auto)"}]}
-
-    elif mode == "travel_to":
-        # Parse "@x,y" or "+dx,dy" (relative)
-        import re
-
-        abs_match = re.match(r"@?(\d+),(\d+)$", target.strip())
-        rel_match = re.match(r"([+-]?\d+),([+-]?\d+)$", target.strip())
-
-        if abs_match:
-            gx, gy = map(int, abs_match.groups())
-        elif rel_match:
-            dx, dy = map(int, rel_match.groups())
-            gx, gy = pos[0] + dx, pos[1] + dy
-        else:
-            return {
-                "content": [{"type": "text", "text": "ERROR: travel_to format: @x,y or +dx,dy"}],
-                "is_error": True,
-            }
-
-        path = pathfind(glyphs, pos, (gx, gy), extra_walkable)
-        if path is None:
-            return {"content": [{"type": "text", "text": f"auto_explore travel_to @{gx},{gy}: NO PATH"}]}
-        if not path:
-            return {"content": [{"type": "text", "text": f"auto_explore travel_to @{gx},{gy}: ALREADY THERE"}]}
-
-        _pending_actions = path
-        return {"content": [{"type": "text", "text": f"auto_explore travel_to @{gx},{gy}: EXECUTING {len(path)} moves (auto)"}]}
-
-    elif mode == "travel":
-        # Parse "north 5" or "NE 3"
-        import re
-
-        match = re.match(r"(\w+)\s+(\d+)", target.strip())
-        if not match:
-            return {
-                "content": [{"type": "text", "text": "ERROR: travel format: direction count (e.g., 'north 5')"}],
-                "is_error": True,
-            }
-
-        dir_name = match.group(1).lower()
-        count = int(match.group(2))
-
-        # Normalize direction
-        dir_map = {
-            "n": "north",
-            "s": "south",
-            "e": "east",
-            "w": "west",
-            "ne": "northeast",
-            "nw": "northwest",
-            "se": "southeast",
-            "sw": "southwest",
-        }
-        if dir_name in dir_map:
-            dir_name = dir_map[dir_name]
-
-        from ..compute.navigation import DIRS
-
-        if dir_name not in DIRS:
-            return {
-                "content": [{"type": "text", "text": f"ERROR: Unknown direction '{dir_name}'"}],
-                "is_error": True,
-            }
-
-        actions = [dir_name] * count
-        _pending_actions = actions
-        return {"content": [{"type": "text", "text": f"auto_explore travel {dir_name} {count}: EXECUTING {count} moves (auto)"}]}
+        mode_suffix = " (cautious)" if cautious else ""
+        return {"content": [{"type": "text", "text": f"auto_explore corridor{mode_suffix}: EXECUTING {len(actions)} actions"}]}
 
     else:
         return {
-            "content": [{"type": "text", "text": f"ERROR: Unknown mode '{mode}'. Use: room, corridor, travel_to, travel"}],
+            "content": [{"type": "text", "text": f"ERROR: Unknown mode '{mode}'. Use: room, corridor"}],
             "is_error": True,
         }

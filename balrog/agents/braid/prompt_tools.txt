@@ -4,14 +4,15 @@ MEMORY TOOLS:
 - memory_add(content, scope, tags, priority) - Store learning/tracking
   - content: What to remember (max 512 chars)
   - scope: "episode" (current run) or "persistent" (forever)
-  - tags: Categories (comma-separated: rule,lvl:1,stairs)
+  - tags: Categories (comma-separated: rule,lvl:1,stairs, ...)
   - priority: 1-9 (higher = shown first in memory list)
 
 - memory_remove(entry_id) - Delete outdated memory by [abc123] ID
 
-- memory_search(query, tags, limit) - Find memories by content and/or tags
+- memory_search(query, tags, scope, limit) - Find memories by content, tags, and/or scope
   - query: Text to search for in memory content (empty string for any)
   - tags: Comma-separated tags to filter by (empty string for any)
+  - scope: "episode" (current run only), "persistent" (cross-game only), or "" (all)
   - limit: Max results to return (default 10)
 
 - memory_discover_tags() - List all tags with counts by scope
@@ -29,12 +30,14 @@ Recording rules (persistent across games):
   memory_add("floating eye: don't melee, use ranged", "persistent", "rule,monster", 8)
   memory_add("always explore full level before descending", "persistent", "rule,strategy", 9)
   memory_add("prayer cooldown ~800 turns", "persistent", "rule,mechanic", 7)
+  USE when discovered working strategy, persistent learning, game play limitation, etc. This can improve your future playthrough attempts.
 
-Searching memory (by content and/or tags):
-  memory_search("stairs", "", 5)           → find stair locations
-  memory_search("", "lvl:1", 10)           → find all level 1 memories
-  memory_search("explored", "room", 10)    → find explored rooms
-  memory_search("blocked", "lvl:2", 10)    → find blocked paths on level 2
+Searching memory (by content, tags, and/or scope):
+  memory_search("stairs", "", "", 5)              → find stair locations (all scopes)
+  memory_search("", "lvl:1", "", 10)              → find all level 1 memories
+  memory_search("", "rule", "persistent", 20)     → get all persistent rules/learnings
+  memory_search("", "", "persistent", 50)         → get ALL persistent memories from other runs
+  memory_search("explored", "room", "episode", 10) → find explored rooms this episode
 
 Removing outdated memory:
   memory_remove("abc123")           → delete entry shown as [abc123] in memory list
@@ -42,6 +45,15 @@ Removing outdated memory:
 Discovering what tags exist at any given time:
   memory_discover_tags()            → list all tags with episode/persistent counts
   # Example output: "Tags (4):\nblocked: 3 episode, 0 persistent\nlvl:1: 5 episode, 0 persistent\nrule: 0 episode, 8 persistent\nstairs: 2 episode, 0 persistent"
+
+MEMORY TAGS (use lvl:N suffix for level-specific):
+  blocked,lvl:N     - "@x,y:dir" blocked moves (CHECK BEFORE MOVING!)
+  frontier,lvl:N    - "@x,y:dir" unexplored directions
+  room,lvl:N        - "@identifier explored:y/n dark:y/n shop:y/n"
+  corridor,lvl:N    - "@x1,y1-x2,y2 explored:y/n"
+  stairs,lvl:N      - ">x,y" or "<x,y" stair locations
+  rule              - game rules learned
+  You can add arbitrary memory tags as needed!
 
 SCANNING TOOLS:
 - scan(target) - View map entities. Target: monsters, items, traps, exits, unexplored
@@ -54,15 +66,23 @@ NAVIGATION TOOLS:
   - command: "distance" args: "@x1,y1 -> @x2,y2"
   - command: "pathfind" args: "@x,y" (from current) or "@x1,y1 -> @x2,y2"
 
-- auto_explore(mode, target, cautious) - Queue exploration/travel actions
-  - mode: "room" - Explore current room (auto-walk, auto-search walls)
-  - mode: "corridor" - Explore current corridor
-  - mode: "travel_to" target: "@x,y" or "+dx,dy" (relative)
-  - mode: "travel" target: "north 5" or "NE 3"
-  - cautious: true to abort on any discovery (secret doors)
+TRAVEL TOOLS:
+- travel_to(target) - Queue movement to a specific location
+  - target: "@x,y" (absolute) or "+dx,dy" (relative to current position)
+  Pathfinds and queues all moves. Aborts on combat, HP drop, or hunger.
+  ALWAYS use when you know the coordinates of target location (from context or memory).
 
-  Queues many actions automatically. Aborts on combat, HP drop, Hungry.
-  NOT great when low on food.
+- travel(direction, count) - Queue movement in a direction for N steps
+  - direction: north, south, east, west, northeast, northwest, southeast, southwest
+  - count: number of steps to take
+  Faster than repeated game_action calls. Aborts on combat, HP drop, or hunger.
+
+EXPLORATION TOOLS:
+- auto_explore(mode, cautious) - Queue exploration of current room or corridor
+  - mode: "room" - Explore current room (walks to all reachable tiles)
+  - mode: "corridor" - Explore current corridor
+  - cautious: true to abort on any new tile discovery (for secret door hunting)
+  Aborts on combat, HP drop, or hunger. NOT great when low on food.
 
 GAME ACTION TOOL:
 - game_action(actions...) - Execute NetHack command(s) in sequence
@@ -93,10 +113,12 @@ After it executes (all queued actions complete), you receive the new game state.
 Read-only tools (scan, navigate, memory) can be called freely before your action.
 
 WORKFLOW:
+0. Prepare: On start, retrieve potentially existing persistent memories
 1. Analyze: scan, navigate, memory_search (as many as needed)
 2. Plan: TodoWrite to track strategy and level exploration progress
-3. Act: ONE game_action with all intended actions, XOR auto_explore
-4. Wait - all actions execute, then you see the resulting game state
+3. Record: Track newly discovered dungeon features etc in memory
+4. Act: ONE game_action with all intended actions, XOR auto_explore
+5. Wait - all actions execute, then you see the resulting game state
 
 IMPORTANT: Prefer auto_explore for exploration, game_action for targeted sequences.
 
@@ -104,7 +126,7 @@ DECISION TREE - FOLLOW EVERY TURN:
 
 1. CHECK STATUS (auto-injected in [STATUS] line)
    HP < 50%? → retreat to stairs_up
-   Hungry/Weak? → game_action("eat")
+   Hungry/Weak? → game_action("eat"), and/or find food
    Message "It's dark"? → go to DARK ROOM section
 
 2. CHECK LOCATION
@@ -124,14 +146,14 @@ DECISION TREE - FOLLOW EVERY TURN:
    └── Locked → game_action("kick north")
 
 3. CHECK THREATS
-   Monster adjacent? → game_action("fight direction")
    Monster visible? → assess threat level, flee or fight
-   Pet nearby? Letters like f/d might be your pet
+   Monster adjacent and survivable? → game_action("fight direction")
+   Pet? Letters like f/d might be your pet
 
 4. CHECK OPPORTUNITIES
    Item on ground? → game_action("pickup")
-   Stairs down visible? → memory_add location, continue exploring
-   Level fully explored? → game_action("south") to stairs_down, descend
+   Stairs down or other dungeon features visible? → memory_add location, continue exploring
+   Level fully explored? → travel to stairs down, descend
 
 FAILURE RECOVERY:
   "no path" → door blocking? open it. Manual moves around obstacle.
@@ -153,20 +175,6 @@ You (@), Pet (letter with *), Monster (letter), Number = invisible monster
 
 Directions: north=y--, south=y++, west=x--, east=x++
 Diagonal: NE=y--,x++  SE=y++,x++  NW=y--,x--  SW=y++,x--
-
-MEMORY TAGS (use lvl:N suffix for level-specific):
-  blocked,lvl:N     - "@x,y:dir" blocked moves (CHECK BEFORE MOVING!)
-  frontier,lvl:N    - "@x,y:dir" unexplored directions
-  room,lvl:N        - "@identifier explored:y/n dark:y/n shop:y/n"
-  corridor,lvl:N    - "@x1,y1-x2,y2 explored:y/n"
-  stairs,lvl:N      - ">x,y" or "<x,y" stair locations
-  rule              - game rules learned
-
-SAVE AS PERSISTENT RULE when:
-- Game mechanic surprises you
-- Strategy works or fails consistently
-- Discover monster/item property
-Format: memory_add(content="category: discovery", scope="persistent", tags="rule", priority=8)
 
 NETHACK ESSENTIALS:
 - Eat before Weak. Many corpses safe. Deadly: cockatrice.

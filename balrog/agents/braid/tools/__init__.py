@@ -18,7 +18,7 @@ from . import memory as memory_module
 from . import navigation as nav_module
 from .action import game_action
 from .memory import memory_add, memory_discover_tags, memory_remove, memory_search
-from .navigation import auto_explore, navigate, scan
+from .navigation import auto_explore, navigate, scan, travel, travel_to
 
 if TYPE_CHECKING:
     from claude_agent_sdk.types import McpSdkServerConfig
@@ -35,6 +35,8 @@ __all__ = [
     "memory_search",
     "scan",
     "navigate",
+    "travel_to",
+    "travel",
     "auto_explore",
     "game_action",
 ]
@@ -64,6 +66,8 @@ def create_braid_mcp_server(storage: BraidStorage) -> McpSdkServerConfig:
             # Navigation tools
             scan,
             navigate,
+            travel_to,
+            travel,
             auto_explore,
             # Action tool
             game_action,
