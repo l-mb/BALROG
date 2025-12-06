@@ -325,6 +325,18 @@ def scan_traps(
 S_STONE = CMAP_OFF + 0
 
 
+def _direction_from(px: int, py: int, tx: int, ty: int) -> str:
+    """Get cardinal/ordinal direction from (px,py) to (tx,ty)."""
+    dx = tx - px
+    dy = ty - py
+    if dx == 0 and dy == 0:
+        return "here"
+    # Determine primary direction
+    ns = "N" if dy < 0 else ("S" if dy > 0 else "")
+    ew = "E" if dx > 0 else ("W" if dx < 0 else "")
+    return ns + ew if ns or ew else "here"
+
+
 def find_unexplored(glyphs: np.ndarray, pos: tuple[int, int]) -> str:
     """Find exploration frontiers - walkable tiles adjacent to unexplored areas.
 
@@ -333,12 +345,12 @@ def find_unexplored(glyphs: np.ndarray, pos: tuple[int, int]) -> str:
         pos: Current (x, y) position
 
     Returns:
-        Formatted string of frontiers: "@44,5(3) @50,12(7)" or "none"
+        Actionable exploration guidance with nearest frontiers and directions.
     """
     px, py = pos
     walkable = build_walkable_mask(glyphs)
     rows, cols = glyphs.shape
-    frontiers = []
+    frontiers: list[tuple[int, int, str, int]] = []  # (x, y, unexplored_dirs, distance)
 
     # Check each walkable tile for adjacent unexplored (stone) tiles
     for row in range(rows):
@@ -360,11 +372,25 @@ def find_unexplored(glyphs: np.ndarray, pos: tuple[int, int]) -> str:
                 frontiers.append((col, row, dirs_str, d))
 
     if not frontiers:
-        return "none"
+        return "FULLY EXPLORED - no unexplored areas visible. Search walls for secret doors or use stairs."
 
     # Sort by distance
     frontiers.sort(key=lambda f: f[3])
-    return " ".join(f"@{f[0]},{f[1]}({f[3]})" for f in frontiers[:10])
+
+    # Build actionable output
+    lines = []
+    for i, (x, y, dirs, d) in enumerate(frontiers[:5]):
+        direction = _direction_from(px, py, x, y)
+        if d == 0:
+            lines.append(f"- HERE @{x},{y}: unexplored {dirs}")
+        else:
+            lines.append(f"- {direction} @{x},{y} (dist {d}): unexplored {dirs}")
+
+    total = len(frontiers)
+    header = f"{total} frontier(s) found. Nearest:"
+    suggestion = f"\nSuggestion: travel_to @{frontiers[0][0]},{frontiers[0][1]} to explore {_direction_from(px, py, frontiers[0][0], frontiers[0][1])}"
+
+    return header + "\n" + "\n".join(lines) + suggestion
 
 
 # Cmap indices for doors and corridors

@@ -60,9 +60,7 @@ Searching memory:
 
 EXAMPLE MEMORY TAGS (use lvl:N suffix for level-specific):
   blocked,lvl:N     - "@x,y:dir" blocked moves (CHECK BEFORE MOVING!)
-  frontier,lvl:N    - "@x,y:dir" unexplored directions
-  room,lvl:N        - "@identifier explored:y/n dark:y/n shop:y/n"
-  corridor,lvl:N    - "@x1,y1-x2,y2 explored:y/n"
+  room,lvl:N        - "@identifier explored:y/n dark:y/n shop:y/n temple:y/n"
   stairs,lvl:N      - ">x,y" (down) or "<x,y" (up) stair locations
   rule              - game rules learned
   You can add/create arbitrary memory tags as needed!
@@ -74,12 +72,11 @@ SCANNING TOOLS:
 - scan(target) - View map entities. Target: monsters, items, traps, exits, unexplored
   Returns positions and distances sorted by proximity
 
-- show_visited_map() - Show ASCII map of current level and branch with already directly visited tiles marked as █
-  Unvisited tiles keep original glyph, indicating coordinates to explore from!
-  Use when:
-  - Level seems explored but no stairs found
-  - Want to verify complete room/corridor coverage
-  - Planning systematic search of missed areas
+  scan("unexplored") is especially useful:
+  - Returns frontiers (walkable tiles next to unexplored areas)
+  - Shows direction from you (N, NE, E, etc.) and distance
+  - Includes actionable suggestion: "travel_to @x,y to explore"
+  - When it says "FULLY EXPLORED", search walls for secret doors
 
 ---
 
@@ -174,14 +171,15 @@ DECISION TREE - FOLLOW EVERY TURN:
 4. CHECK OPPORTUNITIES
    Item on ground? → game_action("pickup")
    Stairs down or other dungeon features visible? → memory_add location, continue exploring
-   Level appears fully explored, but no stairs? → show_visited_map() to find gaps, then search missed areas
+   Level appears fully explored, but no stairs? → scan("unexplored") to find frontiers, search dead ends
    Level fully explored? → travel to stairs down, descend
 
 ---
 
 FAILURE RECOVERY:
   "no path" → door blocking? open it. Manual moves around or through obstacle. Your pet or a monster could be in the way.
-  "NOT IN ROOM" → use game_action("far <direction>") to explore corridor
+  "NOT IN ROOM" → use game_action("far <direction>") to explore corridor, be aware of limitations!
+  Blocked repeatedly by pet to destination → try walking around or through it
   Stuck 3+ turns → try different direction
 
 ---
@@ -228,10 +226,10 @@ Next long-term objective (descend, ...)
 
 PLAN WHEN YOU CANNOT FIND STAIRS:
 - Escalate to meticulously detailed level of planning
-- Use show_visited_map() tool to identify tiles, unexplored corridors you have not visited
+- Use scan("unexplored") to find ALL frontiers, then travel_to each
 - Mark every apparent deadend corridor (# tiles that just end) as a TODO
-- Mark every wall as a separate TODO
-- Visit and Search all these spots
+- Search dead ends multiple times (hidden doors are stubborn!)
+- Visit and Search all these spots systematically
 
 ---
 

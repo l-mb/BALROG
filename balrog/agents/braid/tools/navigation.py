@@ -378,38 +378,3 @@ async def auto_explore(args: dict[str, Any]) -> dict[str, Any]:
     _pending_actions = actions
     mode_suffix = " (cautious)" if cautious else ""
     return {"content": [{"type": "text", "text": f"auto_explore{mode_suffix}: EXECUTING {len(actions)} actions"}]}
-
-
-@tool(
-    "show_visited_map",
-    "Show ASCII map with visited tiles marked. Visited tiles shown as '█', "
-    "unvisited keep original glyph. Use to find unexplored areas when level seems explored but stairs not found.",
-    {},
-)
-async def show_visited_map(args: dict[str, Any]) -> dict[str, Any]:
-    """Render map showing visited vs unvisited tiles."""
-    obs_data = _get_obs_data()
-    if obs_data is None:
-        return {"content": [{"type": "text", "text": "ERROR: No observation available"}], "is_error": True}
-
-    _glyphs, tty_chars, _blstats, pos = obs_data
-    visited = _get_visited()
-
-    # Build ASCII map from tty_chars (rows 1-21 are the map area)
-    rows, cols = tty_chars.shape
-    lines = []
-    for row in range(1, min(22, rows)):  # Skip status line at row 0
-        line = []
-        for col in range(cols):
-            char = chr(tty_chars[row, col]) if tty_chars[row, col] > 0 else " "
-            if (col, row) in visited and (col, row) != pos:
-                char = "█"  # Visited marker
-            line.append(char)
-        lines.append("".join(line).rstrip())
-
-    # Trim empty lines from end
-    while lines and not lines[-1].strip():
-        lines.pop()
-
-    map_str = "\n".join(lines)
-    return {"content": [{"type": "text", "text": f"Visited map (█=walked, other=unvisited):\n{map_str}"}]}
