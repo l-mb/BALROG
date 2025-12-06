@@ -101,11 +101,12 @@ TRAVEL TOOLS:
 
 EXPLORATION TOOLS:
 
-- auto_explore(cautious) - Queue exploration of current room (walks to all floor tiles)
-  - cautious: true to abort on any new tile discovery (slower), false for more complete discovery
-  - Searches once at each wall-adjacent tile (for secret doors)
+- auto_explore(cautious) - Queue exploration of current room (walks perimeter only)
+  - Walks wall-adjacent tiles and searches once at each (for secret doors)
+  - Inner tiles not visited (items/monsters visible from anywhere in lit room)
   - Avoids water/lava, swaps past pets/monsters safely
-  Aborts on combat, HP drop, traps, or hunger. NOT great when low on food.
+  - cautious: true to abort on any new tile discovery, false only aborts on triggers
+  Aborts on combat, HP drop, traps, or hunger.
   For corridors, use game_action("far <direction>") instead.
 
 ---

@@ -546,32 +546,31 @@ def plan_visited_aware_exploration(
     pos: tuple[int, int],
     visited: set[tuple[int, int]],
 ) -> list[str]:
-    """Plan exploration prioritizing unvisited walkable tiles.
+    """Plan room exploration by walking unvisited perimeter tiles.
 
-    Works for rooms (lit/dark/partial) and corridors.
-    Uses visited tiles as known-walkable for pathfinding.
+    Only walks wall-adjacent tiles (perimeter) since inner tiles don't need
+    to be visited - items/monsters are visible from anywhere in a lit room.
+    Searches at each perimeter tile for secret doors.
 
     Args:
         glyphs: 2D glyph array from observation
-        walkable_tiles: Set of tiles known/believed to be walkable (room floor, corridor)
+        walkable_tiles: Set of tiles known/believed to be walkable (room floor)
         pos: Current (x, y) position
         visited: Set of tiles player has stepped on this episode/level
 
     Returns:
-        List of actions to explore unvisited tiles, with searches at perimeter
+        List of actions to walk perimeter with searches
     """
-    unvisited = walkable_tiles - visited
+    # Find perimeter tiles (wall-adjacent) - only these need to be walked
+    perimeter = set(_find_perimeter(walkable_tiles))
+    unvisited_perimeter = perimeter - visited
 
-    if not unvisited:
-        # All walkable tiles visited - return empty (caller handles perimeter search)
+    if not unvisited_perimeter:
+        # All perimeter tiles visited - room fully explored
         return []
 
-    # Find perimeter tiles (wall-adjacent) for searching
-    perimeter = set(_find_perimeter(walkable_tiles))
-
-    # Visit ALL unvisited tiles for both rooms and corridors
-    # Perimeter detection is only used for adding search actions, not filtering targets
-    targets = unvisited
+    # Only walk unvisited perimeter tiles
+    targets = unvisited_perimeter
 
     # BFS tour through targets, using visited as known-walkable
     # Combine visited (confirmed) + walkable_tiles (visible) for pathfinding
@@ -618,7 +617,8 @@ def plan_visited_aware_exploration(
         remaining.discard(nearest)
 
         # Limit actions per call to avoid very long queues
-        if len(actions) > 30:
+        # Perimeter of typical room is ~20 tiles, each with path + search
+        if len(actions) > 50:
             break
 
     return actions
