@@ -764,6 +764,8 @@ class ClaudeToolWrapper(LLMClientWrapper):
         self._mcp_server = None
         # Tool call tracking for logging
         self._tool_calls: list[dict] = []
+        # Connection state
+        self._connected = False
 
     def set_mcp_server(self, mcp_server) -> None:
         """Set the MCP server with BRAID tools."""
@@ -777,48 +779,38 @@ class ClaudeToolWrapper(LLMClientWrapper):
             self._loop = asyncio.new_event_loop()
 
     def _initialize_session(self, system_prompt: str):
-        """Start new SDK session with system prompt and tools."""
+        """Create SDK client with system prompt and tools (doesn't connect yet)."""
         self._ensure_loop()
         self._system_prompt = system_prompt
         self._llm_call_count = 0
 
         thinking_budget = self.client_kwargs.get("thinking_budget", 0)
 
-        async def _connect():
-            from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
+        from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
-            options_kwargs = {
-                "system_prompt": system_prompt,
-                "model": self.model_id,
-                # max_turns must be None or high enough for tool use cycle
-                # Tool use requires: tool_use → tool_result → response (multiple turns)
-            }
+        options_kwargs = {
+            "system_prompt": system_prompt,
+            "model": self.model_id,
+        }
 
-            if thinking_budget and thinking_budget > 0:
-                options_kwargs["max_thinking_tokens"] = thinking_budget
+        if thinking_budget and thinking_budget > 0:
+            options_kwargs["max_thinking_tokens"] = thinking_budget
 
-            # Add MCP server with tools if configured
-            if self._mcp_server is not None:
-                options_kwargs["mcp_servers"] = {"braid": self._mcp_server}
-                # Allow BRAID tools + Claude's built-in TodoWrite for task tracking
-                options_kwargs["allowed_tools"] = ["mcp__braid__*", "TodoWrite"]
-                # Bypass permissions for headless operation - our tools are safe
-                options_kwargs["permission_mode"] = "bypassPermissions"
-                logger.info(f"ClaudeTools: MCP server configured: {self._mcp_server}")
-            else:
-                logger.warning("ClaudeTools: NO MCP server configured - tools will not be available!")
+        # Add MCP server with tools if configured
+        if self._mcp_server is not None:
+            options_kwargs["mcp_servers"] = {"braid": self._mcp_server}
+            # Allow BRAID tools + Claude's built-in TodoWrite for task tracking
+            options_kwargs["allowed_tools"] = ["mcp__braid__*", "TodoWrite"]
+            # Bypass permissions for headless operation - our tools are safe
+            options_kwargs["permission_mode"] = "bypassPermissions"
+            logger.info("ClaudeTools: MCP server configured")
+        else:
+            logger.warning("ClaudeTools: NO MCP server configured - tools will not be available!")
 
-            options = ClaudeAgentOptions(**options_kwargs)
-            self._client = ClaudeSDKClient(options)
-            await self._client.connect()
-            logger.info(f"ClaudeTools connected: model={self.model_id}, thinking={thinking_budget}")
-
-        try:
-            self._loop.run_until_complete(_connect())
-            logger.info(f"ClaudeTools session initialized for model {self.model_id}")
-        except Exception as e:
-            logger.error(f"ClaudeTools session init failed: {type(e).__name__}: {e}")
-            raise
+        options = ClaudeAgentOptions(**options_kwargs)
+        self._client = ClaudeSDKClient(options)
+        self._connected = False
+        logger.info(f"ClaudeTools client created: model={self.model_id}, thinking={thinking_budget}")
 
     def close_session(self):
         """Close current session (call at episode end)."""
@@ -837,6 +829,7 @@ class ClaudeToolWrapper(LLMClientWrapper):
         self._last_sent = None
         self._last_received = None
         self._tool_calls = []
+        self._connected = False
         logger.info("ClaudeTools session closed")
 
     def get_incremental_history(self) -> list[dict[str, str]]:
@@ -876,8 +869,11 @@ class ClaudeToolWrapper(LLMClientWrapper):
         self._ensure_loop()
         self._tool_calls = []  # Reset for this call
 
-        async def _send_and_receive(content: str):
-            """Send query and receive response, tools execute automatically."""
+        async def _send_and_receive(content: str, is_first: bool):
+            """Send query and receive response, tools execute automatically.
+
+            For first message, use connect(prompt) to avoid extra round trip.
+            """
             from claude_agent_sdk.types import AssistantMessage, ResultMessage
 
             response_text = ""
@@ -885,7 +881,12 @@ class ClaudeToolWrapper(LLMClientWrapper):
             output_tokens = 0
             seen_tool_ids: set[str] = set()
 
-            await self._client.query(content)
+            if is_first:
+                # First message: connect with prompt (single round trip)
+                await self._client.connect(content)
+            else:
+                # Subsequent messages: query on existing connection
+                await self._client.query(content)
 
             async for msg in self._client.receive_response():
                 if isinstance(msg, AssistantMessage):
@@ -913,14 +914,17 @@ class ClaudeToolWrapper(LLMClientWrapper):
 
             return response_text, input_tokens, output_tokens
 
+        is_first = not self._connected
+
         def api_call():
             try:
-                return self._loop.run_until_complete(_send_and_receive(latest_content))
+                return self._loop.run_until_complete(_send_and_receive(latest_content, is_first))
             except Exception as e:
                 logger.error(f"ClaudeTools error: {type(e).__name__}: {e}")
                 raise
 
         completion, in_tok, out_tok = self.execute_with_retries(api_call)
+        self._connected = True  # Mark as connected after first successful call
 
         self._last_sent = latest_content
         self._last_received = completion.strip()
