@@ -21,19 +21,6 @@ class BRAIDAgent(BaseAgent):
     - Claude SDK tools: memory, navigation, and action tools for LLM interaction
     """
 
-    # Commands that accept a direction as follow-up input
-    _DIRECTIONAL_COMMANDS = frozenset({
-        "open", "close", "kick", "fight", "force",
-        "zap", "throw", "fire", "untrap", "loot",
-    })
-
-    # Valid directions for compound actions
-    _DIRECTIONS = frozenset({
-        "north", "south", "east", "west",
-        "northeast", "northwest", "southeast", "southwest",
-        "up", "down",
-    })
-
     # Load prompt from external file (tool-based format)
     _PROMPT_FILE = Path(__file__).parent / "prompt_tools.txt"
     _SYSTEM_PROMPT_SUFFIX = _PROMPT_FILE.read_text().strip()
@@ -761,15 +748,6 @@ class BRAIDAgent(BaseAgent):
                 except (IndexError, TypeError, ValueError):
                     pass
         return None
-
-    def _expand_compound_action(self, action: str) -> list[str]:
-        """Expand compound action like 'open north' into ['open', 'north']."""
-        parts = action.lower().split()
-        if len(parts) == 2:
-            cmd, direction = parts
-            if cmd in self._DIRECTIONAL_COMMANDS and direction in self._DIRECTIONS:
-                return [cmd, direction]
-        return [action]
 
     def _clear_batch_state(self) -> None:
         """Clear all batch/queue tracking state."""

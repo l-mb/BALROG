@@ -346,19 +346,6 @@ def _is_corridor_tile(glyphs: np.ndarray, x: int, y: int) -> bool:
     return cmap_idx in CORRIDOR_CMAP  # 21, 22 = corridor, lit corridor
 
 
-def _count_adjacent_floor(glyphs: np.ndarray, x: int, y: int) -> int:
-    """Count adjacent floor/corridor tiles (indicates if in room vs corridor)."""
-    rows, cols = glyphs.shape
-    count = 0
-    for dy, dx in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-        ny, nx = y + dy, x + dx
-        if 0 <= ny < rows and 0 <= nx < cols:
-            cmap_idx = int(glyphs[ny, nx]) - CMAP_OFF
-            if cmap_idx in WALKABLE_CMAP:
-                count += 1
-    return count
-
-
 def find_unexplored(glyphs: np.ndarray, pos: tuple[int, int]) -> str:
     """Find exploration frontiers - places where unexplored areas can be reached.
 

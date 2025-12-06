@@ -323,16 +323,6 @@ class BraidStorage:
                 max_vals.append(row[0])
         return max(max_vals) if max_vals else 0
 
-    def all_tags(self, scope: MemoryScope | None = None, episode: int | None = None) -> set[str]:
-        entries = self.retrieve(scope=scope, episode=episode, limit=10000)
-        tags: set[str] = set()
-        for e in entries:
-            for tag in e.tags.split(","):
-                tag = tag.strip()
-                if tag:
-                    tags.add(tag)
-        return tags
-
     def _row_to_entry(self, row: sqlite3.Row) -> MemoryEntry:
         return MemoryEntry(
             tags=row["tags"],
