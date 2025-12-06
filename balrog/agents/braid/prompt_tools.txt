@@ -36,23 +36,40 @@ NAVIGATION TOOLS:
   NOT great when low on food.
 
 GAME ACTION TOOL:
-- game_action(actions) - Execute NetHack command(s)
-  Single action or newline-separated for multiple.
+- game_action(actions...) - Execute NetHack command(s) in sequence
+  Pass multiple actions as list: game_action("north", "east", "pickup")
   Directions: north south east west northeast northwest southeast southwest
   Compound: "open north", "kick east", "fight south"
   Commands: search, pickup, eat, pray, wait, apply, read, zap, throw
 
-WORKFLOW - ALWAYS USE TOOLS:
-1. FIRST: Use scan(target="exits") or scan(target="unexplored") to assess the map
-2. Use TodoWrite to track your detailed, well-thought out plan (required for complex exploration)
-3. Use auto_explore(mode="room") or auto_explore(mode="corridor") for efficient movement
-4. Use navigate(command="pathfind") to find paths to specific locations
-5. Use game_action ONLY for simple single moves or when auto_explore isn't appropriate
-6. Use memory_add to record important discoveries
+  Examples:
+    game_action("north")                           # single move
+    game_action("north", "north", "east")          # path to location
+    game_action("open east", "east", "pickup")     # open door, enter, grab item
+    game_action("search", "search", "search")      # search 3 times
 
-IMPORTANT: Prefer auto_explore over manual game_action sequences.
-auto_explore queues many actions efficiently and handles wall-following.
-Tools execute automatically - your text response is for reasoning only.
+TOOL EXECUTION MODEL:
+All queued actions execute BEFORE you see the next observation.
+game_action("north", "east", "pickup") → all 3 execute, then you see the final result.
+
+You only get ONE game_action or auto_explore call per response.
+After it executes (all queued actions complete), you receive the new game state.
+
+✓ CORRECT - queue sequence in one call:
+  game_action("north", "east", "pickup")  → all execute, you see final state
+
+✗ WRONG - separate calls (second is ignored):
+  game_action("north") then game_action("east")  → only "north" executes
+
+Read-only tools (scan, navigate, memory) can be called freely before your action.
+
+WORKFLOW:
+1. Analyze: scan, navigate, memory_search (as many as needed)
+2. Plan: TodoWrite to track strategy
+3. Act: ONE game_action or auto_explore with all intended actions
+4. Wait - all actions execute, then you see the resulting game state
+
+IMPORTANT: Prefer auto_explore for exploration, game_action for targeted sequences.
 
 DECISION TREE - FOLLOW EVERY TURN:
 

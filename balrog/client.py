@@ -790,6 +790,7 @@ class ClaudeToolWrapper(LLMClientWrapper):
         thinking_budget = self.client_kwargs.get("thinking_budget", 0)
 
         from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
+        from claude_agent_sdk.types import HookMatcher
 
         options_kwargs = {
             "system_prompt": system_prompt,
@@ -806,7 +807,18 @@ class ClaudeToolWrapper(LLMClientWrapper):
             options_kwargs["allowed_tools"] = ["mcp__braid__*", "TodoWrite"]
             # Bypass permissions for headless operation - our tools are safe
             options_kwargs["permission_mode"] = "bypassPermissions"
-            logger.info("ClaudeTools: MCP server configured")
+
+            # Add PostToolUse hook to stop after state-modifying tools
+            # game_action and auto_explore modify game state - must return to game loop
+            options_kwargs["hooks"] = {
+                "PostToolUse": [
+                    HookMatcher(
+                        matcher="mcp__braid__game_action|mcp__braid__auto_explore",
+                        hooks=[self._stop_after_action_hook],
+                    )
+                ]
+            }
+            logger.info("ClaudeTools: MCP server configured with action-stopping hook")
         else:
             logger.warning("ClaudeTools: NO MCP server configured - tools will not be available!")
 
@@ -814,6 +826,19 @@ class ClaudeToolWrapper(LLMClientWrapper):
         self._client = ClaudeSDKClient(options)
         self._connected = False
         logger.info(f"ClaudeTools client created: model={self.model_id}, thinking={thinking_budget}")
+
+    async def _stop_after_action_hook(self, hook_input, tool_use_id, context):
+        """PostToolUse hook: stop processing after game_action or auto_explore.
+
+        These tools modify game state, so we must return to the game loop
+        to get updated observations before Claude can continue.
+        """
+        tool_name = hook_input.get("tool_name", "")
+        logger.info(f"ClaudeTools: stopping after state-modifying tool: {tool_name}")
+        return {
+            "continue_": False,
+            "stopReason": f"Game state modified by {tool_name}. Returning to game loop for updated observation.",
+        }
 
     def _force_cleanup(self):
         """Force kill any subprocess - called on exit/interrupt."""
@@ -916,13 +941,24 @@ class ClaudeToolWrapper(LLMClientWrapper):
 
             if is_first:
                 # First message: connect without prompt, then query
+                t0 = time.time()
                 await self._client.connect()
+                t1 = time.time()
+                logger.info(f"ClaudeTools connect took {t1-t0:.2f}s")
                 await self._client.query(content)
+                t2 = time.time()
+                logger.info(f"ClaudeTools query took {t2-t1:.2f}s")
             else:
                 # Subsequent messages: query on existing connection
                 await self._client.query(content)
 
+            t_recv_start = time.time()
+            first_msg = True
+            tool_count = 0
             async for msg in self._client.receive_response():
+                if first_msg:
+                    logger.info(f"ClaudeTools first message after {time.time()-t_recv_start:.2f}s")
+                    first_msg = False
                 if isinstance(msg, AssistantMessage):
                     for block in msg.content:
                         if hasattr(block, "text"):
@@ -936,11 +972,16 @@ class ClaudeToolWrapper(LLMClientWrapper):
                                 continue
                             if tool_id:
                                 seen_tool_ids.add(tool_id)
+                            tool_name = getattr(block, "name", "unknown")
                             tool_call = {
-                                "name": getattr(block, "name", "unknown"),
+                                "name": tool_name,
                                 "input": getattr(block, "input", {}),
                             }
                             self._tool_calls.append(tool_call)
+                            tool_count += 1
+                            # Log progress every 10 tools
+                            if tool_count % 10 == 0:
+                                logger.info(f"ClaudeTools: {tool_count} tool calls so far ({time.time()-t_recv_start:.1f}s)")
                 elif isinstance(msg, ResultMessage):
                     if msg.usage:
                         input_tokens = msg.usage.get("input_tokens", 0) or 0

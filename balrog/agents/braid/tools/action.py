@@ -78,23 +78,32 @@ def expand_action(action: str) -> list[str]:
 
 @tool(
     "game_action",
-    "Execute NetHack game action(s). Single action or multiple newline-separated. "
-    "Examples: 'north', 'search', 'eat', 'open north'. Actions queue and execute automatically.",
-    {"actions": str},
+    "Execute NetHack game action(s) in sequence. Pass multiple actions as separate arguments. "
+    "Examples: game_action('north'), game_action('north', 'east', 'pickup'), game_action('open north'). "
+    "Actions queue and execute one per game turn.",
+    {"actions": list[str]},
 )
 async def game_action(args: dict[str, Any]) -> dict[str, Any]:
     """Execute game action(s)."""
     global _pending_actions
 
-    actions_str = args.get("actions", "")
-    if not actions_str.strip():
+    actions_input = args.get("actions", [])
+
+    # Handle both list and string input for robustness
+    if isinstance(actions_input, str):
+        raw_actions = [a.strip() for a in actions_input.strip().split("\n") if a.strip()]
+    elif isinstance(actions_input, list):
+        raw_actions = [str(a).strip() for a in actions_input if str(a).strip()]
+    else:
+        raw_actions = []
+
+    if not raw_actions:
         return {
             "content": [{"type": "text", "text": "ERROR: No actions provided"}],
             "is_error": True,
         }
 
     # Parse and expand actions
-    raw_actions = [a.strip() for a in actions_str.strip().split("\n") if a.strip()]
     expanded: list[str] = []
     for action in raw_actions:
         expanded.extend(expand_action(action))
