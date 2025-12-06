@@ -124,3 +124,34 @@ async def memory_search(args: dict[str, Any]) -> dict[str, Any]:
 
     lines = [f"[{e.entry_id}] ({e.scope.value}, {e.tags}) {e.content}" for e in results]
     return {"content": [{"type": "text", "text": f"Found {len(results)}:\n" + "\n".join(lines)}]}
+
+
+@tool(
+    "memory_discover_tags",
+    "List all tags currently used in memory with counts. Returns tag names with "
+    "episode and persistent memory counts for each.",
+    {},
+)
+async def memory_discover_tags(args: dict[str, Any]) -> dict[str, Any]:
+    """Discover all tags in memory with scope breakdown."""
+    if _storage is None:
+        return {"content": [{"type": "text", "text": "ERROR: Storage not initialized"}], "is_error": True}
+
+    from ..storage import MemoryScope
+
+    # Get counts by scope
+    episode_counts = _storage.count_by_tag(scope=MemoryScope.EPISODE, episode=_episode_number)
+    persistent_counts = _storage.count_by_tag(scope=MemoryScope.PERSISTENT)
+
+    # Merge into unified view
+    all_tags = set(episode_counts.keys()) | set(persistent_counts.keys())
+    if not all_tags:
+        return {"content": [{"type": "text", "text": "No tags found in memory"}]}
+
+    lines = []
+    for tag in sorted(all_tags):
+        ep = episode_counts.get(tag, 0)
+        p = persistent_counts.get(tag, 0)
+        lines.append(f"{tag}: {ep} episode, {p} persistent")
+
+    return {"content": [{"type": "text", "text": f"Tags ({len(all_tags)}):\n" + "\n".join(lines)}]}

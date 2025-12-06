@@ -17,7 +17,7 @@ from . import action as action_module
 from . import memory as memory_module
 from . import navigation as nav_module
 from .action import game_action
-from .memory import memory_add, memory_remove, memory_search
+from .memory import memory_add, memory_discover_tags, memory_remove, memory_search
 from .navigation import auto_explore, navigate, scan
 
 if TYPE_CHECKING:
@@ -30,6 +30,7 @@ __all__ = [
     "set_tool_context",
     "get_pending_actions",
     "memory_add",
+    "memory_discover_tags",
     "memory_remove",
     "memory_search",
     "scan",
@@ -59,6 +60,7 @@ def create_braid_mcp_server(storage: BraidStorage) -> McpSdkServerConfig:
             memory_add,
             memory_remove,
             memory_search,
+            memory_discover_tags,
             # Navigation tools
             scan,
             navigate,

@@ -14,6 +14,9 @@ MEMORY TOOLS:
   - tags: Comma-separated tags to filter by (empty string for any)
   - limit: Max results to return (default 10)
 
+- memory_discover_tags() - List all tags with counts by scope
+  Returns: tag name, episode count, persistent count for each tag
+
 MEMORY EXAMPLES:
 
 Recording discoveries (episode-scoped):
@@ -35,6 +38,10 @@ Searching memory (by content and/or tags):
 
 Removing outdated memory:
   memory_remove("abc123")           → delete entry shown as [abc123] in memory list
+
+Discovering what tags exist at any given time:
+  memory_discover_tags()            → list all tags with episode/persistent counts
+  # Example output: "Tags (4):\nblocked: 3 episode, 0 persistent\nlvl:1: 5 episode, 0 persistent\nrule: 0 episode, 8 persistent\nstairs: 2 episode, 0 persistent"
 
 SCANNING TOOLS:
 - scan(target) - View map entities. Target: monsters, items, traps, exits, unexplored
@@ -172,7 +179,8 @@ NETHACK ESSENTIALS:
 - Gold, scrolls, potions, wands AUTO-PICKUP
 - Stairs up from Dlvl:1 = INSTANT LOSS
 - Diagonal movement saves steps
-- Must be ADJACENT to open, kick, fight
+- "far <direction>" actions greatly improve movement speed, BUT the first step in the direction MUST be possible
+- Must be DIRECTLY ADJACENT for open, kick, fight actions
 
 [STATUS] line auto-injected each turn.
 
