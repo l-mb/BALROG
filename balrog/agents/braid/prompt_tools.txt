@@ -1,6 +1,24 @@
-AVAILABLE TOOLS:
+CRITICAL - READ FIRST:
+
+You get ONE game-state-changing action per turn.
+- game_action, travel, travel_to, auto_explore → pick ONE per turn
+- All queued actions execute, THEN you see the result
+- Read-only tools (scan, navigate, memory_*) have no limit
+
+✓ CORRECT: game_action("north", "east", "pickup") → all execute, you see final state
+✗ WRONG: game_action("north") then game_action("east") → only "north" executes
+
+WORKFLOW EACH TURN:
+0. First turn: memory_search("", "", "persistent", 50) for prior learnings
+1. Analyze: scan, navigate, memory_search (unlimited)
+2. Plan: TodoWrite for strategy tracking
+3. Record: memory_add for discoveries
+4. Act: ONE action tool (game_action OR travel/travel_to OR auto_explore)
+
+---
 
 MEMORY TOOLS:
+
 - memory_add(content, scope, tags, priority) - Store learning/tracking
   - content: What to remember (max 512 chars)
   - scope: "episode" (current run) or "persistent" (forever)
@@ -16,7 +34,6 @@ MEMORY TOOLS:
   - limit: Max results to return (default 10)
 
 - memory_discover_tags() - List all tags with counts by scope
-  Returns: tag name, episode count, persistent count for each tag
 
 MEMORY EXAMPLES:
 
@@ -30,21 +47,14 @@ Recording rules (persistent across games):
   memory_add("floating eye: don't melee, use ranged", "persistent", "rule,monster", 8)
   memory_add("always explore full level before descending", "persistent", "rule,strategy", 9)
   memory_add("prayer cooldown ~800 turns", "persistent", "rule,mechanic", 7)
-  USE when discovered working strategy, persistent learning, game play limitation, etc. This can improve your future playthrough attempts.
+  USE persistent scope for working strategies, game mechanics learned, dangers discovered.
 
-Searching memory (by content, tags, and/or scope):
+Searching memory:
   memory_search("stairs", "", "", 5)              → find stair locations (all scopes)
   memory_search("", "lvl:1", "", 10)              → find all level 1 memories
   memory_search("", "rule", "persistent", 20)     → get all persistent rules/learnings
-  memory_search("", "", "persistent", 50)         → get ALL persistent memories from other runs
+  memory_search("", "", "persistent", 50)         → get ALL persistent memories
   memory_search("explored", "room", "episode", 10) → find explored rooms this episode
-
-Removing outdated memory:
-  memory_remove("abc123")           → delete entry shown as [abc123] in memory list
-
-Discovering what tags exist at any given time:
-  memory_discover_tags()            → list all tags with episode/persistent counts
-  # Example output: "Tags (4):\nblocked: 3 episode, 0 persistent\nlvl:1: 5 episode, 0 persistent\nrule: 0 episode, 8 persistent\nstairs: 2 episode, 0 persistent"
 
 MEMORY TAGS (use lvl:N suffix for level-specific):
   blocked,lvl:N     - "@x,y:dir" blocked moves (CHECK BEFORE MOVING!)
@@ -55,40 +65,54 @@ MEMORY TAGS (use lvl:N suffix for level-specific):
   rule              - game rules learned
   You can add arbitrary memory tags as needed!
 
+---
+
 SCANNING TOOLS:
+
 - scan(target) - View map entities. Target: monsters, items, traps, exits, unexplored
   Returns positions and distances sorted by proximity
 
+---
+
 NAVIGATION TOOLS:
+
 - navigate(command, args) - Query paths and distances
   - command: "nearest" args: "stairs_down|altar|fountain|sink|throne"
     - ONLY works if you have already discovered the target!
   - command: "distance" args: "@x1,y1 -> @x2,y2"
   - command: "pathfind" args: "@x,y" (from current) or "@x1,y1 -> @x2,y2"
 
+---
+
 TRAVEL TOOLS:
+
 - travel_to(target) - Queue movement to a specific location
   - target: "@x,y" (absolute) or "+dx,dy" (relative to current position)
-  Pathfinds and queues all moves. Aborts on combat, HP drop, or hunger.
-  ALWAYS use when you know the coordinates of target location (from context or memory).
+  Pathfinds and queues all moves. Aborts on combat, HP drop, traps, or hunger.
+  ALWAYS use when you know the target coordinates.
 
 - travel(direction, count) - Queue movement in a direction for N steps
-  - direction: north, south, east, west, northeast, northwest, southeast, southwest
+  - direction: see DIRECTIONS in reference section
   - count: number of steps to take
-  Faster than repeated game_action calls. Aborts on combat, HP drop, or hunger.
+  Faster than repeated game_action calls. Aborts on combat, traps, HP drop, or hunger.
+
+---
 
 EXPLORATION TOOLS:
+
 - auto_explore(mode, cautious) - Queue exploration of current room or corridor
   - mode: "room" - Explore current room (walks to all reachable tiles)
   - mode: "corridor" - Explore current corridor
-  - cautious: true to abort on any new tile discovery (for secret door hunting)
-  Aborts on combat, HP drop, or hunger. NOT great when low on food.
+  - cautious: true to abort on any new tile discovery (slower), false for more complete discovery
+  Aborts on combat, HP drop, traps, or hunger. NOT great when low on food.
+
+---
 
 GAME ACTION TOOL:
+
 - game_action(actions...) - Execute NetHack command(s) in sequence
   Pass multiple actions as list: game_action("north", "east", "pickup")
-  Directions: north south east west northeast northwest southeast southwest
-  Compound: "open north", "kick east", "fight south"
+  Compound actions: "open north", "kick east", "fight south"
   Commands: search, pickup, eat, pray, wait, apply, read, zap, throw
 
   Examples:
@@ -97,30 +121,7 @@ GAME ACTION TOOL:
     game_action("open east", "east", "pickup")     # open door, enter, grab item
     game_action("search", "search", "search")      # search 3 times
 
-TOOL EXECUTION MODEL:
-All queued actions execute BEFORE you see the next observation.
-game_action("north", "east", "pickup") → all 3 execute, then you see the final result.
-
-You only get ONE game_action or auto_explore call per response.
-After it executes (all queued actions complete), you receive the new game state.
-
-✓ CORRECT - queue sequence in one call:
-  game_action("north", "east", "pickup")  → all execute, you see final state
-
-✗ WRONG - separate calls (second is ignored):
-  game_action("north") then game_action("east")  → only "north" executes
-
-Read-only tools (scan, navigate, memory) can be called freely before your action.
-
-WORKFLOW:
-0. Prepare: On start, retrieve potentially existing persistent memories
-1. Analyze: scan, navigate, memory_search (as many as needed)
-2. Plan: TodoWrite to track strategy and level exploration progress
-3. Record: Track newly discovered dungeon features etc in memory
-4. Act: ONE game_action with all intended actions, XOR auto_explore
-5. Wait - all actions execute, then you see the resulting game state
-
-IMPORTANT: Prefer auto_explore for exploration, game_action for targeted sequences.
+---
 
 DECISION TREE - FOLLOW EVERY TURN:
 
@@ -155,11 +156,15 @@ DECISION TREE - FOLLOW EVERY TURN:
    Stairs down or other dungeon features visible? → memory_add location, continue exploring
    Level fully explored? → travel to stairs down, descend
 
+---
+
 FAILURE RECOVERY:
   "no path" → door blocking? open it. Manual moves around obstacle.
   "NOT IN ROOM" → try auto_explore(mode="corridor")
   "NOT IN CORRIDOR" → try auto_explore(mode="room")
   Stuck 3+ turns → try different direction
+
+---
 
 DARK ROOM PROTOCOL:
 Message "It's dark" or floor shows ' ' not '.' = dark room
@@ -168,12 +173,18 @@ Message "It's dark" or floor shows ' ' not '.' = dark room
 3. auto_explore WORKS in dark rooms
 4. memory_add dark room info
 
+---
+
+REFERENCE:
+
 MAP SYMBOLS:
 You (@), Pet (letter with *), Monster (letter), Number = invisible monster
-. floor  # corridor  | - walls  + closed door  < stairs UP > stairs DOWN
+. floor  # corridor  | - walls  + closed door  < stairs UP  > stairs DOWN
 { fountain  _ altar  ^ trap  $ gold  ) weapon  [ armor  ! potion
 
-Directions: north=y--, south=y++, west=x--, east=x++
+DIRECTIONS:
+north south east west northeast northwest southeast southwest
+Coordinates: north=y--, south=y++, west=x--, east=x++
 Diagonal: NE=y--,x++  SE=y++,x++  NW=y--,x--  SW=y++,x--
 
 NETHACK ESSENTIALS:
@@ -181,15 +192,16 @@ NETHACK ESSENTIALS:
 - Do NOT eat when satiated
 - Prayer: 800+ turn cooldown, emergencies only
 - Elbereth: engrave for protection
-- HP < 30%: retreat toward stairs_up
 - Descend when level fully explored
 - Pets detect mimics; keep pet nearby
 - Gold, scrolls, potions, wands AUTO-PICKUP
 - Stairs up from Dlvl:1 = INSTANT LOSS
 - Diagonal movement saves steps
-- "far <direction>" actions greatly improve movement speed, BUT the first step in the direction MUST be possible
+- "far <direction>" actions greatly improve movement speed
 - Must be DIRECTLY ADJACENT for open, kick, fight actions
 
 [STATUS] line auto-injected each turn.
+
+---
 
 BENCHMARK GOAL: Maximize Score via dungeon depth, XP, milestones.
