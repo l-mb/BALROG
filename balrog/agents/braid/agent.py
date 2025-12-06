@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import time
 from pathlib import Path
@@ -8,6 +9,8 @@ from balrog.agents.base import BaseAgent
 from balrog.client import LLMResponse
 
 from .storage import BraidStorage, MemoryEntry, MemoryScope
+
+logger = logging.getLogger(__name__)
 
 
 class BRAIDAgent(BaseAgent):
@@ -33,16 +36,16 @@ class BRAIDAgent(BaseAgent):
         "up", "down",
     })
 
-    # Load prompt from external file
-    _PROMPT_FILE = Path(__file__).parent / "prompt.txt"
+    # Load prompt from external file (tool-based format)
+    _PROMPT_FILE = Path(__file__).parent / "prompt_tools.txt"
     _SYSTEM_PROMPT_SUFFIX = _PROMPT_FILE.read_text().strip()
 
     def __init__(self, client_factory: Any, prompt_builder: Any, config: Any):
-        # BRAID requires Claude SDK for session-based context management
+        # BRAID requires Claude Tools client for tool-based interactions
         client_name = config.client.client_name.lower()
-        if client_name != "claude-sdk":
+        if client_name != "claude-tools":
             raise ValueError(
-                f"BRAIDAgent requires client_name='claude-sdk', got '{client_name}'. "
+                f"BRAIDAgent requires client_name='claude-tools', got '{client_name}'. "
                 f"Supported models: claude-haiku-4-5, claude-sonnet-4, claude-opus-4-5"
             )
 
@@ -55,6 +58,14 @@ class BRAIDAgent(BaseAgent):
         self.max_memory_context = braid_cfg.get("max_persistent_context", 100)
         self.episode_number = self.storage.max_episode()
         self._enabled_tags: set[str] | None = None
+
+        # Create MCP server with BRAID tools and attach to client
+        from .tools import create_braid_mcp_server
+
+        self._mcp_server = create_braid_mcp_server(self.storage)
+        if hasattr(self.client, "set_mcp_server"):
+            self.client.set_mcp_server(self._mcp_server)
+            logger.info("BRAID MCP server attached to client")
 
         # Override history limit if specified
         if "max_text_history" in braid_cfg:
@@ -95,16 +106,19 @@ class BRAIDAgent(BaseAgent):
         self._batch_executed: int = 0  # Actions executed so far
         self._max_explore_actions: int = 100  # Safety limit for explore_room/corridor
 
-        # Compute helpers state
-        self._enable_compute = braid_cfg.get("enable_compute_helpers", True)
-        self._pending_compute: list[str] = []
-        self._compute_result: str | None = None
-
         # Current game turn (from blstats) for correcting actlog entries
         self._current_game_turn: int | None = None
 
         # Memory refresh interval (include memory in system prompt every N LLM calls)
         self._memory_refresh_interval: int = 100
+
+        # Current observation for tools (set before each generate)
+        self._current_obs: dict[str, Any] | None = None
+
+        # Legacy compute helpers state (TODO: remove after tool migration complete)
+        self._enable_compute = braid_cfg.get("enable_compute_helpers", True)
+        self._pending_compute: list[str] = []
+        self._compute_result: str | None = None
 
     def build_system_prompt(self, env_instruction: str) -> str:
         """Append BRAID response format instructions to environment prompt."""
@@ -262,7 +276,31 @@ class BRAIDAgent(BaseAgent):
 
         self._cumulative_llm_calls += 1
         self._episode_llm_calls += 1
+
+        # Set tool context before generate (tools need current obs, storage, episode, step)
+        from .tools import get_pending_actions, set_tool_context
+
+        set_tool_context(obs, self.storage, self.episode_number, self._step, self._enabled_tags)
+
         response = self.client.generate(messages)
+
+        # Get pending actions from tools (auto_explore, game_action populate these)
+        tool_actions = get_pending_actions()
+        if tool_actions:
+            self._action_queue.extend(tool_actions)
+            if not self._batch_source:
+                self._batch_source = "tool_action"
+                self._batch_total = len(tool_actions)
+                self._batch_executed = 0
+            logger.debug(f"Tools queued {len(tool_actions)} actions")
+
+        # Extract and save TodoWrite calls from SDK tool calls
+        if hasattr(self.client, "get_tool_calls"):
+            for tc in self.client.get_tool_calls():
+                if tc.get("name") == "TodoWrite":
+                    todos = tc.get("input", {}).get("todos", [])
+                    if todos:
+                        self.storage.save_todos(self.episode_number, self._step, todos)
 
         # Log SDK incremental prompt (SDK-only, always available)
         self.storage.log_sdk_prompt(

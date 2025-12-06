@@ -739,6 +739,196 @@ class ClaudeSDKWrapper(LLMClientWrapper):
         )
 
 
+class ClaudeToolWrapper(LLMClientWrapper):
+    """Wrapper using Claude Agent SDK with MCP tools for BRAID.
+
+    Extends ClaudeSDKWrapper with tool support via in-process MCP server.
+    Tools execute automatically during response generation.
+    Use client_name='claude-tools' to enable.
+    """
+
+    def __init__(self, client_config):
+        """Initialize the ClaudeToolWrapper with the given configuration."""
+        super().__init__(client_config)
+        import asyncio
+
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._client = None
+        self._llm_call_count = 0
+        self._system_prompt: str | None = None
+        self._system_refresh_interval = self.client_kwargs.get("system_refresh_interval", 100)
+        self._last_sent: str | None = None
+        self._last_received: str | None = None
+        self._conversation_history: list[dict[str, str]] = []
+        # MCP server for tools
+        self._mcp_server = None
+        # Tool call tracking for logging
+        self._tool_calls: list[dict] = []
+
+    def set_mcp_server(self, mcp_server) -> None:
+        """Set the MCP server with BRAID tools."""
+        self._mcp_server = mcp_server
+
+    def _ensure_loop(self):
+        """Create event loop if needed."""
+        import asyncio
+
+        if self._loop is None:
+            self._loop = asyncio.new_event_loop()
+
+    def _initialize_session(self, system_prompt: str):
+        """Start new SDK session with system prompt and tools."""
+        self._ensure_loop()
+        self._system_prompt = system_prompt
+        self._llm_call_count = 0
+
+        thinking_budget = self.client_kwargs.get("thinking_budget", 0)
+
+        async def _connect():
+            from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
+
+            options_kwargs = {
+                "system_prompt": system_prompt,
+                "model": self.model_id,
+                # max_turns must be None or high enough for tool use cycle
+                # Tool use requires: tool_use → tool_result → response (multiple turns)
+            }
+
+            if thinking_budget and thinking_budget > 0:
+                options_kwargs["max_thinking_tokens"] = thinking_budget
+
+            # Add MCP server with tools if configured
+            if self._mcp_server is not None:
+                options_kwargs["mcp_servers"] = {"braid": self._mcp_server}
+                # Allow BRAID tools + Claude's built-in TodoWrite for task tracking
+                options_kwargs["allowed_tools"] = ["mcp__braid__*", "TodoWrite"]
+                # Bypass permissions for headless operation - our tools are safe
+                options_kwargs["permission_mode"] = "bypassPermissions"
+                logger.info("ClaudeTools: MCP server configured with BRAID tools")
+
+            options = ClaudeAgentOptions(**options_kwargs)
+            self._client = ClaudeSDKClient(options)
+            await self._client.connect()
+            logger.info(f"ClaudeTools connected: model={self.model_id}, thinking={thinking_budget}")
+
+        try:
+            self._loop.run_until_complete(_connect())
+            logger.info(f"ClaudeTools session initialized for model {self.model_id}")
+        except Exception as e:
+            logger.error(f"ClaudeTools session init failed: {type(e).__name__}: {e}")
+            raise
+
+    def close_session(self):
+        """Close current session (call at episode end)."""
+        if self._client and self._loop:
+
+            async def _disconnect():
+                await self._client.disconnect()
+
+            try:
+                self._loop.run_until_complete(_disconnect())
+            except Exception as e:
+                logger.warning(f"Error closing ClaudeTools session: {e}")
+            self._client = None
+        self._llm_call_count = 0
+        self._conversation_history = []
+        self._last_sent = None
+        self._last_received = None
+        self._tool_calls = []
+        logger.info("ClaudeTools session closed")
+
+    def get_incremental_history(self) -> list[dict[str, str]]:
+        """Return conversation history for monitoring (newest first)."""
+        return list(reversed(self._conversation_history))
+
+    def get_tool_calls(self) -> list[dict]:
+        """Return tool calls from last generate() for logging."""
+        return self._tool_calls
+
+    def generate(self, messages) -> LLMResponse:
+        """Generate response using SDK session with tool execution.
+
+        Tools execute automatically via the SDK tool runner.
+        """
+        # Extract system prompt
+        system_prompt = None
+        user_messages = messages
+        if messages and messages[0].role == "system":
+            system_prompt = messages[0].content
+            user_messages = messages[1:]
+
+        # Initialize session if needed
+        if self._client is None:
+            self._initialize_session(system_prompt or "")
+
+        # Periodic system prompt refresh
+        self._llm_call_count += 1
+        needs_refresh = self._system_refresh_interval > 0 and self._llm_call_count % self._system_refresh_interval == 0
+
+        latest_content = user_messages[-1].content if user_messages else ""
+
+        if needs_refresh and system_prompt:
+            latest_content = f"[CONTEXT REFRESH]\n{system_prompt}\n\n[Current observation]\n{latest_content}"
+            logger.debug(f"Refreshing system prompt at LLM call {self._llm_call_count}")
+
+        self._ensure_loop()
+        self._tool_calls = []  # Reset for this call
+
+        async def _send_and_receive(content: str):
+            """Send query and receive response, tools execute automatically."""
+            from claude_agent_sdk.types import AssistantMessage, ResultMessage
+
+            response_text = ""
+            input_tokens = 0
+            output_tokens = 0
+
+            await self._client.query(content)
+
+            async for msg in self._client.receive_response():
+                if isinstance(msg, AssistantMessage):
+                    for block in msg.content:
+                        if hasattr(block, "text"):
+                            response_text += block.text
+                        # Track tool uses
+                        if hasattr(block, "type") and block.type == "tool_use":
+                            tool_call = {
+                                "name": getattr(block, "name", "unknown"),
+                                "input": getattr(block, "input", {}),
+                            }
+                            self._tool_calls.append(tool_call)
+                elif isinstance(msg, ResultMessage):
+                    if msg.usage:
+                        input_tokens = msg.usage.get("input_tokens", 0) or 0
+                        output_tokens = msg.usage.get("output_tokens", 0) or 0
+
+            return response_text, input_tokens, output_tokens
+
+        def api_call():
+            try:
+                return self._loop.run_until_complete(_send_and_receive(latest_content))
+            except Exception as e:
+                logger.error(f"ClaudeTools error: {type(e).__name__}: {e}")
+                raise
+
+        completion, in_tok, out_tok = self.execute_with_retries(api_call)
+
+        self._last_sent = latest_content
+        self._last_received = completion.strip()
+        self._conversation_history.append({"role": "user", "content": latest_content})
+        self._conversation_history.append({"role": "assistant", "content": self._last_received})
+
+        logger.info(f"ClaudeTools usage: in={in_tok}, out={out_tok}, call={self._llm_call_count}, tools={len(self._tool_calls)}")
+
+        return LLMResponse(
+            model_id=self.model_id,
+            completion=self._last_received,
+            stop_reason="end_turn",
+            input_tokens=in_tok,
+            output_tokens=out_tok,
+            reasoning=None,
+        )
+
+
 def create_llm_client(client_config):
     """
     Factory function to create the appropriate LLM client based on the client name.
@@ -754,6 +944,7 @@ def create_llm_client(client_config):
         - gemini: Google Generative AI
         - claude: Direct Anthropic Messages API (stateless, uses prompt caching)
         - claude-sdk: Claude Agent SDK (session-based, maintains context)
+        - claude-tools: Claude Agent SDK with MCP tools (for BRAID agent)
     """
 
     def client_factory():
@@ -763,6 +954,9 @@ def create_llm_client(client_config):
             return OpenAIWrapper(client_config)
         elif "gemini" in client_name_lower:
             return GoogleGenerativeAIWrapper(client_config)
+        elif client_name_lower == "claude-tools":
+            # SDK client with MCP tools - must match exactly
+            return ClaudeToolWrapper(client_config)
         elif client_name_lower == "claude-sdk":
             # Session-based SDK client - must match exactly
             return ClaudeSDKWrapper(client_config)

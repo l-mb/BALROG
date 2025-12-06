@@ -6,13 +6,14 @@ agent:
   max_cot_history: 1 # Maximum number of chain-of-thought steps to keep in history (if using 'cot' type of agent)
   max_icl_history: 1000 # Maximum number of ICL steps to keep in history (if using 'few_shot' type of agent)
   cache_icl: False
-  braid: # BRAID agent settings (requires client_name=claude-sdk)
+  braid: # BRAID agent settings (requires client_name=claude-tools)
     db_path: "memory/braid.db" # SQLite database for memory + journal
     max_persistent_context: 100 # Max memory entries to include in prompt
     max_text_history: 1 # Override: BRAID uses memory instead of long history
     log_full_prompt: true # Log full LLM prompts (large, for debugging)
     log_memory_details: true # Log what was added/removed in memory updates
-    enable_compute_helpers: true # Enable navigation helpers (pathfind, nearest, travel_to)
+    enable_compute_helpers: true # Enable navigation helpers (scan, navigate, auto_explore)
+    tool_timeout: 30 # Per-tool execution timeout in seconds
 
 eval:
   output_dir: "results" # Directory where evaluation results will be saved

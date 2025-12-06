@@ -78,6 +78,34 @@ CREATE TABLE IF NOT EXISTS visited (
 );
 
 CREATE INDEX IF NOT EXISTS idx_visited_lookup ON visited(worker_id, episode, dlvl);
+
+CREATE TABLE IF NOT EXISTS tool_calls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    worker_id TEXT NOT NULL,
+    episode INTEGER NOT NULL,
+    step INTEGER NOT NULL,
+    tool_name TEXT NOT NULL,
+    args TEXT,
+    result TEXT,
+    latency_ms INTEGER,
+    error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_tool_calls_step ON tool_calls(worker_id, episode, step);
+
+CREATE TABLE IF NOT EXISTS todos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    worker_id TEXT NOT NULL,
+    episode INTEGER NOT NULL,
+    step INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    active_form TEXT,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'in_progress', 'completed')),
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_todos_episode ON todos(worker_id, episode);
 """
 
 
@@ -461,3 +489,101 @@ class BraidStorage:
             (self.worker_id, episode, dlvl),
         ).fetchall()
         return {(row[0], row[1]) for row in rows}
+
+    # -------------------------------------------------------------------------
+    # Tool call logging
+    # -------------------------------------------------------------------------
+
+    def log_tool_call(
+        self,
+        episode: int,
+        step: int,
+        tool_name: str,
+        args: str | None,
+        result: str | None,
+        latency_ms: int,
+        error: str | None = None,
+    ) -> None:
+        """Log a tool invocation for debugging and visualization."""
+        self.conn.execute(
+            """INSERT INTO tool_calls (timestamp, worker_id, episode, step, tool_name, args, result, latency_ms, error)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (self._now(), self.worker_id, episode, step, tool_name, args, result, latency_ms, error),
+        )
+        self.conn.commit()
+
+    def get_recent_tool_calls(
+        self, episode: int, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """Get recent tool calls for an episode."""
+        rows = self.conn.execute(
+            """SELECT id, timestamp, step, tool_name, args, result, latency_ms, error
+               FROM tool_calls
+               WHERE worker_id = ? AND episode = ?
+               ORDER BY id DESC LIMIT ?""",
+            (self.worker_id, episode, limit),
+        ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "timestamp": r["timestamp"],
+                "step": r["step"],
+                "tool_name": r["tool_name"],
+                "args": json.loads(r["args"]) if r["args"] else None,
+                "result": r["result"],
+                "latency_ms": r["latency_ms"],
+                "error": r["error"],
+            }
+            for r in rows
+        ]
+
+    # -------------------------------------------------------------------------
+    # Todo tracking
+    # -------------------------------------------------------------------------
+
+    def save_todos(
+        self, episode: int, step: int, todos: list[dict[str, Any]]
+    ) -> None:
+        """Save current todo state (replaces all todos for this episode)."""
+        # Clear existing todos for this episode
+        self.conn.execute(
+            "DELETE FROM todos WHERE worker_id = ? AND episode = ?",
+            (self.worker_id, episode),
+        )
+        # Insert new todos
+        now = self._now()
+        for todo in todos:
+            self.conn.execute(
+                """INSERT INTO todos (worker_id, episode, step, content, active_form, status, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    self.worker_id,
+                    episode,
+                    step,
+                    todo.get("content", ""),
+                    todo.get("activeForm", ""),
+                    todo.get("status", "pending"),
+                    now,
+                ),
+            )
+        self.conn.commit()
+
+    def get_todos(self, episode: int) -> list[dict[str, Any]]:
+        """Get todos for an episode."""
+        rows = self.conn.execute(
+            """SELECT content, active_form, status, step, updated_at
+               FROM todos
+               WHERE worker_id = ? AND episode = ?
+               ORDER BY id ASC""",
+            (self.worker_id, episode),
+        ).fetchall()
+        return [
+            {
+                "content": r["content"],
+                "activeForm": r["active_form"],
+                "status": r["status"],
+                "step": r["step"],
+                "updated_at": r["updated_at"],
+            }
+            for r in rows
+        ]

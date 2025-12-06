@@ -102,8 +102,66 @@
       </article>
     </div>
 
-    <!-- Right column: Live Conversation -->
+    <!-- Right column: Tools, Todos, Conversation -->
     <div class="right-column">
+      <!-- Todo list panel -->
+      {% if todos %}
+      <article class="todo-panel">
+        <header>
+          {% set pending = todos|selectattr('status', 'equalto', 'pending')|list|length %}
+          {% set in_progress = todos|selectattr('status', 'equalto', 'in_progress')|list|length %}
+          {% set completed = todos|selectattr('status', 'equalto', 'completed')|list|length %}
+          Todos ({{ completed }}/{{ todos|length }})
+          <div class="todo-progress">
+            <span class="todo-bar" style="width: {{ (100 * completed / todos|length)|int if todos else 0 }}%"></span>
+          </div>
+        </header>
+        <div class="todo-list">
+          {% for todo in todos %}
+          <div class="todo-item todo-{{ todo.status }}">
+            <span class="todo-status">{% if todo.status == 'completed' %}✓{% elif todo.status == 'in_progress' %}▶{% else %}○{% endif %}</span>
+            <span class="todo-content">{{ todo.activeForm if todo.status == 'in_progress' else todo.content }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </article>
+      {% endif %}
+
+      <!-- Tool calls timeline -->
+      {% if tool_calls %}
+      <article class="tool-panel">
+        <header>Tool Calls ({{ tool_calls|length }})</header>
+        <div class="tool-list">
+          <table>
+            <thead>
+              <tr>
+                <th class="col-step">@</th>
+                <th class="col-tool">Tool</th>
+                <th class="col-latency">ms</th>
+                <th class="col-result">Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for tc in tool_calls %}
+              <tr class="{% if tc.error %}tool-error{% endif %}">
+                <td class="col-step">{{ tc.step }}</td>
+                <td class="col-tool">
+                  <span class="tool-name">{{ tc.tool_name }}</span>
+                  {% if tc.args %}<span class="tool-args">{{ tc.args|tojson|truncate(50) }}</span>{% endif %}
+                </td>
+                <td class="col-latency">{{ tc.latency_ms or '-' }}</td>
+                <td class="col-result">
+                  {% if tc.error %}<span class="tool-error-msg">{{ tc.error }}</span>
+                  {% elif tc.result %}<pre>{{ tc.result }}</pre>{% else %}-{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </article>
+      {% endif %}
+
       <article class="conversation-panel">
         <header>
           Conversation

@@ -481,3 +481,62 @@ class MonitorDB:
             (worker_id, episode),
         ).fetchone()
         return int(row["dlvl"]) if row and row["dlvl"] is not None else None
+
+    def get_recent_tool_calls(
+        self, worker_id: str, episode: int, limit: int = 30
+    ) -> list[dict]:
+        """Get recent tool calls for an episode."""
+        # Check if tool_calls table exists
+        tables = self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='tool_calls'"
+        ).fetchone()
+        if not tables:
+            return []
+
+        rows = self.conn.execute(
+            """SELECT id, timestamp, step, tool_name, args, result, latency_ms, error
+               FROM tool_calls
+               WHERE worker_id = ? AND episode = ?
+               ORDER BY id DESC LIMIT ?""",
+            (worker_id, episode, limit),
+        ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "timestamp": r["timestamp"],
+                "step": r["step"],
+                "tool_name": r["tool_name"],
+                "args": json.loads(r["args"]) if r["args"] else None,
+                "result": r["result"][:200] if r["result"] else None,  # Truncate for display
+                "latency_ms": r["latency_ms"],
+                "error": r["error"],
+            }
+            for r in rows
+        ]
+
+    def get_todos(self, worker_id: str, episode: int) -> list[dict]:
+        """Get todos for an episode."""
+        # Check if todos table exists
+        tables = self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='todos'"
+        ).fetchone()
+        if not tables:
+            return []
+
+        rows = self.conn.execute(
+            """SELECT content, active_form, status, step, updated_at
+               FROM todos
+               WHERE worker_id = ? AND episode = ?
+               ORDER BY id ASC""",
+            (worker_id, episode),
+        ).fetchall()
+        return [
+            {
+                "content": r["content"],
+                "activeForm": r["active_form"],
+                "status": r["status"],
+                "step": r["step"],
+                "updated_at": r["updated_at"],
+            }
+            for r in rows
+        ]

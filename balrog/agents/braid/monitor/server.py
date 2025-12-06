@@ -94,6 +94,10 @@ def create_app(db_path: Path) -> Starlette:
                     row_data.append((char, is_visited))
                 screen_rows.append(row_data)
 
+        # Get tool calls and todos
+        tool_calls = db.get_recent_tool_calls(worker_id, current_episode) if current_episode else []
+        todos = db.get_todos(worker_id, current_episode) if current_episode else []
+
         return templates.TemplateResponse(
             request,
             "partials/all.html",
@@ -113,6 +117,8 @@ def create_app(db_path: Path) -> Starlette:
                 "sdk_prompt": sdk_prompt,
                 "using_sdk": using_sdk,
                 "visited_count": len(visited),
+                "tool_calls": tool_calls,
+                "todos": todos,
             },
         )
 

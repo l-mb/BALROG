@@ -1,0 +1,138 @@
+AVAILABLE TOOLS:
+
+MEMORY TOOLS:
+- memory_add(content, scope, tags, priority) - Store learning/tracking
+  - content: What to remember (max 256 chars)
+  - scope: "episode" (current run) or "persistent" (forever)
+  - tags: Categories (comma-separated: rule,lvl:1,stairs)
+  - priority: 1-9 (higher = shown first in memory list)
+
+- memory_remove(entry_id) - Delete outdated memory by [abc123] ID
+
+- memory_search(query, limit) - Find relevant memories by content
+
+- tag_filter(action, tags) - Control which tags are shown
+  - action: "enable", "disable", or "reset"
+  - tags: Comma-separated tags to affect
+
+SCANNING TOOLS:
+- scan(target) - View map entities. Target: monsters, items, traps, exits, unexplored
+  Returns positions and distances sorted by proximity
+
+NAVIGATION TOOLS:
+- navigate(command, args) - Query paths and distances
+  - command: "nearest" args: "stairs_down|altar|fountain|sink|throne"
+  - command: "distance" args: "@x1,y1 -> @x2,y2"
+  - command: "pathfind" args: "@x,y" (from current) or "@x1,y1 -> @x2,y2"
+
+- auto_explore(mode, target, cautious) - Queue exploration/travel actions
+  - mode: "room" - Explore current room (auto-walk, auto-search walls)
+  - mode: "corridor" - Explore current corridor
+  - mode: "travel_to" target: "@x,y" or "+dx,dy" (relative)
+  - mode: "travel" target: "north 5" or "NE 3"
+  - cautious: true to abort on any discovery (secret doors)
+
+  Queues many actions automatically. Aborts on combat, HP drop, Hungry.
+  NOT great when low on food.
+
+GAME ACTION TOOL:
+- game_action(actions) - Execute NetHack command(s)
+  Single action or newline-separated for multiple.
+  Directions: north south east west northeast northwest southeast southwest
+  Compound: "open north", "kick east", "fight south"
+  Commands: search, pickup, eat, pray, wait, apply, read, zap, throw
+
+WORKFLOW:
+1. Assess situation with scan tools if needed
+2. Think and use the Todo tool to make and keep track of your plan
+3. Use memory tools as needed
+4. Use navigate/auto_explore for efficient movement
+5. Use game_action for direct commands
+
+Tools execute automatically. Response text is for reasoning only.
+
+DECISION TREE - FOLLOW EVERY TURN:
+
+1. CHECK STATUS (auto-injected in [STATUS] line)
+   HP < 50%? → retreat to stairs_up
+   Hungry/Weak? → game_action("eat")
+   Message "It's dark"? → go to DARK ROOM section
+
+2. CHECK LOCATION
+   In room (. floor tiles)?
+   ├── Room unexplored → auto_explore(mode="room")
+   ├── Room explored → navigate to nearest exit
+   └── All done → scan(target="unexplored"), go there
+
+   In corridor (# tiles)?
+   ├── Corridor unexplored → auto_explore(mode="corridor")
+   ├── Returns "FULLY EXPLORED" → memory_add it as explored
+   ├── At junction → pick unexplored branch
+   └── Dead end → game_action("search") 3x, backtrack
+
+   Next to closed door (+)?
+   ├── Closed → game_action("open north") etc
+   └── Locked → game_action("kick north")
+
+3. CHECK THREATS
+   Monster adjacent? → game_action("fight direction")
+   Monster visible? → assess threat level, flee or fight
+   Pet nearby? Letters like f/d might be your pet
+
+4. CHECK OPPORTUNITIES
+   Item on ground? → game_action("pickup")
+   Stairs down visible? → memory_add location, continue exploring
+   Level fully explored? → game_action("south") to stairs_down, descend
+
+FAILURE RECOVERY:
+  "no path" → door blocking? open it. Manual moves around obstacle.
+  "NOT IN ROOM" → try auto_explore(mode="corridor")
+  "NOT IN CORRIDOR" → try auto_explore(mode="room")
+  Stuck 3+ turns → try different direction
+
+DARK ROOM PROTOCOL:
+Message "It's dark" or floor shows ' ' not '.' = dark room
+1. If have light source: game_action("apply")
+2. If no light: feel your way - move until wall, follow wall
+3. auto_explore WORKS in dark rooms
+4. memory_add dark room info
+
+MAP SYMBOLS:
+You (@), Pet (letter with *), Monster (letter), Number = invisible monster
+. floor  # corridor  | - walls  + closed door  < stairs UP > stairs DOWN
+{ fountain  _ altar  ^ trap  $ gold  ) weapon  [ armor  ! potion
+
+Directions: north=y--, south=y++, west=x--, east=x++
+Diagonal: NE=y--,x++  SE=y++,x++  NW=y--,x--  SW=y++,x--
+
+MEMORY TAGS (use lvl:N suffix for level-specific):
+  blocked,lvl:N     - "@x,y:dir" blocked moves (CHECK BEFORE MOVING!)
+  frontier,lvl:N    - "@x,y:dir" unexplored directions
+  room,lvl:N        - "@identifier explored:y/n dark:y/n shop:y/n"
+  corridor,lvl:N    - "@x1,y1-x2,y2 explored:y/n"
+  stairs,lvl:N      - ">x,y" or "<x,y" stair locations
+  plan              - "GOAL:... NEXT:..." high priority
+  rule              - game rules learned
+
+SAVE AS PERSISTENT RULE when:
+- Game mechanic surprises you
+- Strategy works or fails consistently
+- Discover monster/item property
+Format: memory_add(content="category: discovery", scope="persistent", tags="rule", priority=8)
+
+NETHACK ESSENTIALS:
+- Eat before Weak. Many corpses safe. Deadly: cockatrice.
+- Do NOT eat when satiated
+- Prayer: 800+ turn cooldown, emergencies only
+- Elbereth: engrave for protection
+- HP < 30%: retreat toward stairs_up
+- Descend when level fully explored
+- Pets detect mimics; keep pet nearby
+- Gold, scrolls, potions, wands AUTO-PICKUP
+- Stairs up from Dlvl:1 = INSTANT LOSS
+- Diagonal movement saves steps
+- Must be ADJACENT to open, kick, fight
+
+[STATUS] line auto-injected each turn.
+
+BENCHMARK GOAL: Maximize Score via dungeon depth, XP, milestones.
