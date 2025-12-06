@@ -679,8 +679,9 @@ class ClaudeSDKWrapper(LLMClientWrapper):
         # SDK maintains conversation history
         latest_content = user_messages[-1].content if user_messages else ""
 
-        if needs_refresh and self._system_prompt:
-            latest_content = f"[CONTEXT REFRESH - Remember these instructions]\n{self._system_prompt}\n\n[Current observation]\n{latest_content}"
+        # Use current system_prompt (includes current memory state) for refresh
+        if needs_refresh and system_prompt:
+            latest_content = f"[CONTEXT REFRESH]\n{system_prompt}\n\n[Current observation]\n{latest_content}"
             logger.debug(f"Refreshing system prompt at LLM call {self._llm_call_count}")
 
         self._ensure_loop()

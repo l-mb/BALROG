@@ -103,6 +103,9 @@ class BRAIDAgent(BaseAgent):
         # Current game turn (from blstats) for correcting actlog entries
         self._current_game_turn: int | None = None
 
+        # Memory refresh interval (include memory in system prompt every N LLM calls)
+        self._memory_refresh_interval: int = 100
+
     def build_system_prompt(self, env_instruction: str) -> str:
         """Append BRAID response format instructions to environment prompt."""
         return f"{env_instruction}\n\n{self._SYSTEM_PROMPT_SUFFIX}"
@@ -218,7 +221,19 @@ class BRAIDAgent(BaseAgent):
         messages = self.prompt_builder.get_prompt()
 
         if messages:
+            # Enhance user message with status + observation
             messages[-1].content = self._build_enhanced_prompt(messages[-1].content, obs)
+
+            # Inject memory into system prompt on first call and every N LLM calls
+            include_memory = (
+                self._episode_llm_calls == 0  # First call this episode
+                or (self._memory_refresh_interval > 0
+                    and self._episode_llm_calls % self._memory_refresh_interval == 0)
+            )
+            if include_memory and messages[0].role == "system":
+                memory_context = self._build_memory_context()
+                if memory_context:
+                    messages[0].content = f"{messages[0].content}\n\n[CURRENT MEMORY]\n{memory_context}"
 
         # Increment step and start timing
         self._step += 1
@@ -266,17 +281,9 @@ class BRAIDAgent(BaseAgent):
 
         return parsed
 
-    def _build_enhanced_prompt(self, current_content: str, obs: dict[str, Any]) -> str:
-        """Build prompt optimized for cache hits and minimal queries."""
+    def _build_memory_context(self) -> str:
+        """Build formatted memory context for system prompt injection."""
         sections = []
-
-        # Auto-inject status from blstats
-        raw_obs = obs.get("obs", {})
-        blstats = raw_obs.get("blstats") if isinstance(raw_obs, dict) else None
-        if blstats is not None:
-            from .compute.navigation import format_status
-            self._current_game_turn = int(blstats[20])
-            sections.append(f"[STATUS] {format_status(blstats)}")
 
         p_entries = self.storage.retrieve(
             tags=self._enabled_tags, scope=MemoryScope.PERSISTENT, limit=self.max_memory_context
@@ -313,6 +320,20 @@ class BRAIDAgent(BaseAgent):
         tag_info = self._compute_tag_summary(p_entries + e_entries)
         if tag_info:
             sections.append(tag_info)
+
+        return "\n\n".join(sections)
+
+    def _build_enhanced_prompt(self, current_content: str, obs: dict[str, Any]) -> str:
+        """Build user prompt with status and observation (no memory - that goes in system)."""
+        sections = []
+
+        # Auto-inject status from blstats
+        raw_obs = obs.get("obs", {})
+        blstats = raw_obs.get("blstats") if isinstance(raw_obs, dict) else None
+        if blstats is not None:
+            from .compute.navigation import format_status
+            self._current_game_turn = int(blstats[20])
+            sections.append(f"[STATUS] {format_status(blstats)}")
 
         # Inject compute results if available
         if self._compute_result:
@@ -913,7 +934,7 @@ class BRAIDAgent(BaseAgent):
                         mode_str = " (cautious)" if cautious else ""
                         results.append(f"explore_room{mode_str}: EXECUTING {len(actions)} actions (auto)")
                     else:
-                        results.append("explore_room: NO ACTIONS (already at perimeter?)")
+                        results.append("explore_room: FULLY EXPLORED (all tiles visited) - MEMORIZE this room as explored")
                 else:
                     results.append("explore_room: NOT IN ROOM (try explore_corridor)")
 
@@ -938,7 +959,7 @@ class BRAIDAgent(BaseAgent):
                         mode_str = " (cautious)" if cautious else ""
                         results.append(f"explore_corridor{mode_str}: EXECUTING {len(actions)} actions (auto)")
                     else:
-                        results.append("explore_corridor: NO ACTIONS")
+                        results.append("explore_corridor: FULLY EXPLORED (all tiles visited, no unexplored branches) - MEMORIZE this corridor as explored")
                 else:
                     results.append("explore_corridor: NOT IN CORRIDOR (try explore_room)")
 
