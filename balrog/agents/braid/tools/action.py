@@ -105,11 +105,24 @@ async def game_action(args: dict[str, Any]) -> dict[str, Any]:
 
     actions_input = args.get("actions", [])
 
-    # Handle both list and string input for robustness
-    # LLMs often pass comma-separated strings instead of proper lists
+    # Handle various input formats LLMs produce:
+    # - Proper list: ["north", "east"]
+    # - Stringified JSON: "[\"north\", \"east\"]"
+    # - Comma-separated: "north, east"
     if isinstance(actions_input, str):
+        import json
         import re
-        raw_actions = [a.strip() for a in re.split(r"[,\n]", actions_input) if a.strip()]
+        # Try JSON parse first (handles stringified arrays)
+        try:
+            parsed = json.loads(actions_input)
+            if isinstance(parsed, list):
+                raw_actions = [str(a).strip() for a in parsed if str(a).strip()]
+            else:
+                # JSON parsed but not a list - treat as single action
+                raw_actions = [str(parsed).strip()] if str(parsed).strip() else []
+        except json.JSONDecodeError:
+            # Fall back to comma/newline split
+            raw_actions = [a.strip() for a in re.split(r"[,\n]", actions_input) if a.strip()]
     elif isinstance(actions_input, list):
         raw_actions = [str(a).strip() for a in actions_input if str(a).strip()]
     else:

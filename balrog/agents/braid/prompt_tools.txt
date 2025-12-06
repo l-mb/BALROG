@@ -5,10 +5,9 @@ You get ONE game-state-changing action per turn.
 - All queued actions execute, THEN you see the result
 - Read-only tools (scan, navigate, memory_*) have no limit
 
-✓ CORRECT: game_action(actions=["north", "east", "pickup"]) → all execute, you see final state
-✗ WRONG: game_action(actions="north, east, pickup") → must be a LIST not a string
-✓ CORRECT: game_action(actions=["fight north"]) → command with direction
-✗ WRONG: calling game_action tool more than once per turn → error, none executed
+✓ CORRECT: game_action("north", "east", "pickup") → all execute, you see final state
+✓ CORRECT: game_action("fight north") → command with direction
+✗ WRONG: calling game_action twice per turn → error, none executed
 
 WORKFLOW EACH TURN:
 0. First turn: memory_search("", "", "persistent", 50) for prior learnings
@@ -111,15 +110,15 @@ EXPLORATION TOOLS:
 
 GAME ACTION TOOL:
 
-- game_action(actions) - Execute NetHack command(s) in sequence
-  Parameter: actions = ["action1", "action2", ...]  (list of strings)
+- game_action("action1", "action2", ...) - Execute NetHack command(s) in sequence
   Compound actions: "open north", "kick east", "fight south"
 
   Examples:
-    game_action(actions=["north"])                              # single move
-    game_action(actions=["north", "north", "east"])             # path to location
-    game_action(actions=["open east", "east", "pickup"])        # open door, enter, grab
-    game_action(actions=["search", "search", "search"])         # search 3 times
+    game_action("north")                              # single move
+    game_action("north", "north", "east")             # path to location
+    game_action("open east", "east", "pickup")        # open door, enter, grab
+    game_action("search", "search", "search")         # search 3 times
+    game_action("north", "search", "north", "search") # searching while moving
 
 ---
 
@@ -127,7 +126,7 @@ DECISION TREE - FOLLOW EVERY TURN:
 
 1. CHECK STATUS (auto-injected in [STATUS] line)
    HP < 50%? → retreat to stairs_up
-   Hungry/Weak? → game_action(actions=["eat"]), and/or find food
+   Hungry/Weak? → game_action("eat"), and/or find food
    Message "It's dark"? → go to DARK ROOM section
 
 2. CHECK LOCATION
@@ -140,20 +139,20 @@ DECISION TREE - FOLLOW EVERY TURN:
    ├── Corridor unexplored → auto_explore(mode="corridor")
    ├── Returns "FULLY EXPLORED" → memory_add it as explored
    ├── At junction → pick unexplored branch
-   └── Dead end → game_action(actions=["search", "search", "search"]), backtrack, memorize
+   └── Dead end → game_action("search", "search", "search"), backtrack, memorize
 
    Next to closed door (+)?
-   ├── Closed → game_action(actions=["open north"]) etc
-   ├── Resisting → Retry game_action(actions=["open north"]), quieter/safer than kicking
-   └── Locked → game_action(actions=["kick north"]), unlock if you have a key
+   ├── Closed → game_action("open north") etc
+   ├── Resisting → Retry game_action("open north"), quieter/safer than kicking
+   └── Locked → game_action("kick north"), unlock if you have a key
 
 3. CHECK THREATS
    Monster visible? → assess threat level, flee or fight
-   Monster adjacent and survivable? → game_action(actions=["fight south"]) (use actual direction)
+   Monster adjacent and survivable? → game_action("fight south") (use actual direction)
    Pet? Letters like f/d might be your pet
 
 4. CHECK OPPORTUNITIES
-   Item on ground? → game_action(actions=["pickup"])
+   Item on ground? → game_action("pickup")
    Stairs down or other dungeon features visible? → memory_add location, continue exploring
    Level appears fully explored, but no stairs? → make detailed plan to re-search along walls, corridors
    Level fully explored? → travel to stairs down, descend
@@ -170,7 +169,7 @@ FAILURE RECOVERY:
 
 DARK ROOM PROTOCOL:
 Message "It's dark" or floor shows ' ' not '.' = dark room
-1. If have light source: game_action(actions=["apply"])
+1. If have light source: game_action("apply")
 2. If no light: feel your way - move until wall, follow wall
 3. auto_explore WORKS in dark rooms
 4. memory_add dark room info
