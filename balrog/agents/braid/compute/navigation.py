@@ -10,6 +10,23 @@ CMAP_OFF = nethack.GLYPH_CMAP_OFF
 # Hunger state names (blstats index 21)
 HUNGER_STATES = ["Satiated", "OK", "Hungry", "Weak", "Fainting", "Fainted", "Starved"]
 
+# Dungeon branch names (blstats index 23: dungeon_number)
+# Order from NetHack dungeon.def - indices assigned at load time
+DUNGEON_BRANCHES = {
+    0: "Dungeons of Doom",
+    1: "Gnomish Mines",
+    2: "Sokoban",
+    3: "The Quest",
+    4: "Fort Ludios",
+    5: "Gehennom",
+    # Vlad's Tower is part of Gehennom (same dnum, different levels)
+}
+
+
+def get_branch_name(dungeon_num: int) -> str:
+    """Get human-readable branch name from dungeon_number."""
+    return DUNGEON_BRANCHES.get(dungeon_num, f"Unknown Branch ({dungeon_num})")
+
 # Direction vectors: (dy, dx) for NetHack coordinate system
 # In NetHack, y increases downward (row), x increases rightward (column)
 DIRS = {

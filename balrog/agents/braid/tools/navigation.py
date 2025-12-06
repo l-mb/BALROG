@@ -20,7 +20,8 @@ if TYPE_CHECKING:
 _obs: dict[str, Any] | None = None
 _storage: BraidStorage | None = None
 _episode: int = 0
-_dlvl: int = 1
+_dungeon_num: int = 0  # blstats[23] - branch identifier (0=Dungeons, 2=Mines, etc.)
+_dlvl: int = 1  # blstats[12] - depth display
 
 # Action queue for auto-exploration - picked up by agent after tool execution
 _pending_actions: list[str] = []
@@ -31,7 +32,7 @@ _action_tools_called: list[str] = []
 
 def set_context(obs: dict[str, Any], storage: BraidStorage, episode: int) -> None:
     """Set context for navigation tools. Called by agent before generate()."""
-    global _obs, _storage, _episode, _dlvl
+    global _obs, _storage, _episode, _dungeon_num, _dlvl
     _obs = obs
     _storage = storage
     _episode = episode
@@ -42,6 +43,7 @@ def set_context(obs: dict[str, Any], storage: BraidStorage, episode: int) -> Non
             blstats = raw_obs.get("blstats", obs.get("blstats"))
             if blstats is not None:
                 _dlvl = int(blstats[12])
+                _dungeon_num = int(blstats[23])
 
 
 def clear_action_tool_tracking() -> None:
@@ -91,10 +93,10 @@ def _get_obs_data() -> tuple[np.ndarray, np.ndarray, np.ndarray, tuple[int, int]
 
 
 def _get_visited() -> set[tuple[int, int]]:
-    """Get visited tiles for current episode/level."""
+    """Get visited tiles for current episode/level/branch."""
     if _storage is None:
         return set()
-    return _storage.get_visited_for_level(_episode, _dlvl)
+    return _storage.get_visited_for_level(_episode, _dungeon_num, _dlvl)
 
 
 @tool(

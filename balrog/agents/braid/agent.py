@@ -100,6 +100,10 @@ class BRAIDAgent(BaseAgent):
         # Memory refresh interval (include memory in system prompt every N LLM calls)
         self._memory_refresh_interval: int = 100
 
+        # Level change tracking for branch announcements
+        self._last_dungeon_num: int | None = None
+        self._last_dlvl: int | None = None
+
     def build_system_prompt(self, env_instruction: str) -> str:
         """Append BRAID response format instructions to environment prompt."""
         return f"{env_instruction}\n\n{self._SYSTEM_PROMPT_SUFFIX}"
@@ -157,8 +161,8 @@ class BRAIDAgent(BaseAgent):
                 # Log position and screen for queued action (for Web UI)
                 queued_dlvl: int | None = None
                 if pos_info:
-                    x, y, queued_dlvl = pos_info
-                    self.storage.log_position(self.episode_number, self._step, queued_dlvl, x, y)
+                    x, y, dungeon_num, queued_dlvl = pos_info
+                    self.storage.log_position(self.episode_number, self._step, dungeon_num, queued_dlvl, x, y)
                 screen = self._extract_screen(obs)
                 if screen:
                     self.storage.log_screen(self.episode_number, self._step, screen, dlvl=queued_dlvl)
@@ -191,8 +195,8 @@ class BRAIDAgent(BaseAgent):
                 self._step += 1
                 cont_dlvl: int | None = None
                 if pos_info:
-                    x, y, cont_dlvl = pos_info
-                    self.storage.log_position(self.episode_number, self._step, cont_dlvl, x, y)
+                    x, y, dungeon_num, cont_dlvl = pos_info
+                    self.storage.log_position(self.episode_number, self._step, dungeon_num, cont_dlvl, x, y)
                 screen = self._extract_screen(obs)
                 if screen:
                     self.storage.log_screen(self.episode_number, self._step, screen, dlvl=cont_dlvl)
@@ -245,8 +249,8 @@ class BRAIDAgent(BaseAgent):
         # Log position for LLM action
         pos_dlvl: int | None = None
         if pos_info:
-            px, py, pos_dlvl = pos_info
-            self.storage.log_position(self.episode_number, self._step, pos_dlvl, px, py)
+            px, py, dungeon_num, pos_dlvl = pos_info
+            self.storage.log_position(self.episode_number, self._step, dungeon_num, pos_dlvl, px, py)
 
         # Log screen if available (include dlvl for monitor overlay)
         screen = self._extract_screen(obs)
@@ -379,9 +383,29 @@ class BRAIDAgent(BaseAgent):
         raw_obs = obs.get("obs", {})
         blstats = raw_obs.get("blstats") if isinstance(raw_obs, dict) else None
         if blstats is not None:
-            from .compute.navigation import format_status
+            from .compute.navigation import format_status, get_branch_name
             self._current_game_turn = int(blstats[20])
             sections.append(f"[STATUS] {format_status(blstats)}")
+
+            # Check for level/branch change and announce
+            dungeon_num = int(blstats[23])
+            dlvl = int(blstats[12])
+            level_changed = (
+                self._last_dungeon_num is not None
+                and (dungeon_num != self._last_dungeon_num or dlvl != self._last_dlvl)
+            )
+            if level_changed:
+                branch_name = get_branch_name(dungeon_num)
+                if dungeon_num != self._last_dungeon_num:
+                    # Branch change (e.g., entering Mines or returning to Dungeon)
+                    sections.append(f"[LEVEL AND DUNGEON BRANCH CHANGE] Entered {branch_name}, level {dlvl}.")
+                else:
+                    # Same branch, different level
+                    sections.append(f"[LEVEL CHANGE] Now on {branch_name} level {dlvl}.")
+
+            # Update tracking
+            self._last_dungeon_num = dungeon_num
+            self._last_dlvl = dlvl
 
         # Inject queue abort notification if queue was just aborted
         if self._queue_abort_msg:
@@ -653,12 +677,13 @@ class BRAIDAgent(BaseAgent):
             return False
 
         pos = (pos_info[0], pos_info[1])
-        dlvl = pos_info[2]
+        dungeon_num = pos_info[2]
+        dlvl = pos_info[3]
 
         # Get visited tiles for this level
-        visited = self.storage.get_visited_for_level(self.episode_number, dlvl)
+        visited = self.storage.get_visited_for_level(self.episode_number, dungeon_num, dlvl)
 
-        # Re-plan based on exploration type
+        # Re-plan based on exploration type (only room supported, corridor uses far commands)
         if self._batch_source == "explore_room":
             from .compute.navigation import detect_room, plan_room_exploration
             room = detect_room(glyphs, pos)
@@ -671,21 +696,6 @@ class BRAIDAgent(BaseAgent):
                     self.storage.log_error(
                         self.episode_number, self._step,
                         f"Re-planned room exploration around {len(new_traps)} new trap(s)"
-                    )
-                    return True
-
-        elif self._batch_source == "explore_corridor":
-            from .compute.navigation import detect_corridor, plan_corridor_exploration
-            corridor = detect_corridor(glyphs, pos)
-            if corridor:
-                new_actions = plan_corridor_exploration(glyphs, corridor, pos, visited=visited)
-                if new_actions:
-                    self._action_queue = list(new_actions)
-                    self._batch_total = len(new_actions)
-                    self._batch_executed = 0
-                    self.storage.log_error(
-                        self.episode_number, self._step,
-                        f"Re-planned corridor exploration around {len(new_traps)} new trap(s)"
                     )
                     return True
 
@@ -712,8 +722,8 @@ class BRAIDAgent(BaseAgent):
 
     def _extract_position_info(
         self, obs: dict[str, Any]
-    ) -> tuple[int, int, int] | None:
-        """Extract (x, y, dlvl) from observation blstats."""
+    ) -> tuple[int, int, int, int] | None:
+        """Extract (x, y, dungeon_num, dlvl) from observation blstats."""
         raw_obs = obs.get("obs")
         if isinstance(raw_obs, dict):
             blstats = raw_obs.get("blstats")
@@ -722,7 +732,8 @@ class BRAIDAgent(BaseAgent):
                     x = int(blstats[0])
                     y = int(blstats[1])
                     dlvl = int(blstats[12])
-                    return (x, y, dlvl)
+                    dungeon_num = int(blstats[23])
+                    return (x, y, dungeon_num, dlvl)
                 except (IndexError, TypeError, ValueError):
                     pass
         return None
@@ -793,28 +804,23 @@ class BRAIDAgent(BaseAgent):
             return False
 
         from .compute.navigation import (
-            detect_corridor,
             detect_room,
             get_position,
-            plan_corridor_exploration,
             plan_room_exploration,
         )
 
         pos = get_position(blstats)
+        dungeon_num = int(blstats[23])
         dlvl = int(blstats[12])
-        visited = self.storage.get_visited_for_level(self.episode_number, dlvl)
+        visited = self.storage.get_visited_for_level(self.episode_number, dungeon_num, dlvl)
 
         new_actions: list[str] = []
 
+        # Only room exploration is auto-continued; corridor uses far commands
         if self._batch_source == "explore_room":
             room = detect_room(glyphs, pos)
             if room:
                 new_actions = plan_room_exploration(glyphs, room, pos, visited=visited)
-
-        elif self._batch_source == "explore_corridor":
-            corridor = detect_corridor(glyphs, pos)
-            if corridor:
-                new_actions = plan_corridor_exploration(glyphs, corridor, pos, visited=visited)
 
         if new_actions:
             self._action_queue = list(new_actions)
@@ -843,6 +849,8 @@ class BRAIDAgent(BaseAgent):
         self._batch_source = None
         self._batch_total = 0
         self._batch_executed = 0
+        self._last_dungeon_num = None  # Reset level tracking
+        self._last_dlvl = None
         self.storage.log_reset(self.episode_number, str(self.config.client.model_id))
 
     def on_episode_end(self) -> None:

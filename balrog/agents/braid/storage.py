@@ -70,14 +70,15 @@ CREATE TABLE IF NOT EXISTS visited (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     worker_id TEXT NOT NULL,
     episode INTEGER NOT NULL,
+    dungeon_num INTEGER NOT NULL DEFAULT 0,
     dlvl INTEGER NOT NULL,
     x INTEGER NOT NULL,
     y INTEGER NOT NULL,
     first_step INTEGER NOT NULL,
-    UNIQUE(worker_id, episode, dlvl, x, y)
+    UNIQUE(worker_id, episode, dungeon_num, dlvl, x, y)
 );
 
-CREATE INDEX IF NOT EXISTS idx_visited_lookup ON visited(worker_id, episode, dlvl);
+CREATE INDEX IF NOT EXISTS idx_visited_lookup ON visited(worker_id, episode, dungeon_num, dlvl);
 
 CREATE TABLE IF NOT EXISTS tool_calls (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -507,22 +508,22 @@ class BraidStorage:
         self._log(episode, step, "compute", {"requests": requests, "results": results})
 
     def log_position(
-        self, episode: int, step: int, dlvl: int, x: int, y: int
+        self, episode: int, step: int, dungeon_num: int, dlvl: int, x: int, y: int
     ) -> None:
         """Log visited position (upsert - only stores first visit)."""
         self.conn.execute(
-            """INSERT OR IGNORE INTO visited (worker_id, episode, dlvl, x, y, first_step)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (self.worker_id, episode, dlvl, x, y, step),
+            """INSERT OR IGNORE INTO visited (worker_id, episode, dungeon_num, dlvl, x, y, first_step)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (self.worker_id, episode, dungeon_num, dlvl, x, y, step),
         )
         self.conn.commit()
 
-    def get_visited_for_level(self, episode: int, dlvl: int) -> set[tuple[int, int]]:
-        """Get all visited (x, y) positions for current episode/level."""
+    def get_visited_for_level(self, episode: int, dungeon_num: int, dlvl: int) -> set[tuple[int, int]]:
+        """Get all visited (x, y) positions for current episode/level/branch."""
         rows = self.conn.execute(
             """SELECT x, y FROM visited
-               WHERE worker_id = ? AND episode = ? AND dlvl = ?""",
-            (self.worker_id, episode, dlvl),
+               WHERE worker_id = ? AND episode = ? AND dungeon_num = ? AND dlvl = ?""",
+            (self.worker_id, episode, dungeon_num, dlvl),
         ).fetchall()
         return {(row[0], row[1]) for row in rows}
 
