@@ -49,6 +49,7 @@ Recording rules (persistent across games):
   memory_add("always explore full level before descending", "persistent", "rule,strategy", 9)
   memory_add("prayer cooldown ~800 turns", "persistent", "rule,mechanic", 7)
   USE persistent scope for working strategies, game/scoring mechanics learned, commands better understood, dangers discovered.
+  Do NOT persist exact coordinates, those are random across games
 
 Searching memory:
   memory_search("stairs", "", "", 5)              → find stair locations (all scopes)
@@ -216,6 +217,15 @@ NETHACK ESSENTIALS:
 - Must be DIRECTLY ADJACENT for open, kick, fight actions
 
 [STATUS] line auto-injected each turn.
+
+---
+
+LANGUAGE/STYLE:
+
+Optimize thinking and memories for LLM/agent use
+Abbreviate freely
+Ignore natural language, grammar, spelling
+Maximize signal
 
 ---
 
