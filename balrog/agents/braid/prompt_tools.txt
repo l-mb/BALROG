@@ -58,7 +58,7 @@ Searching memory:
   memory_search("", "", "persistent", 50)         → get ALL persistent memories
   memory_search("explored", "room", "episode", 10) → find explored rooms this episode
 
-MEMORY TAGS (use lvl:N suffix for level-specific):
+EXAMPLE MEMORY TAGS (use lvl:N suffix for level-specific):
   blocked,lvl:N     - "@x,y:dir" blocked moves (CHECK BEFORE MOVING!)
   frontier,lvl:N    - "@x,y:dir" unexplored directions
   room,lvl:N        - "@identifier explored:y/n dark:y/n shop:y/n"
@@ -154,7 +154,7 @@ DECISION TREE - FOLLOW EVERY TURN:
    In corridor (# tiles)?
    ├── Corridor continues → game_action("far north") (stops at junction/door/end)
    ├── At junction → pick unexplored branch, game_action("far <direction>")
-   ├── Dead end → game_action("search", "search", "search"), backtrack
+   ├── Dead end → game_action("search", "search", "search", ...), backtrack
    └── Memorize explored corridors and junctions
 
    Next to closed door (+)?
@@ -182,19 +182,10 @@ FAILURE RECOVERY:
 
 ---
 
-DARK ROOM PROTOCOL:
-Message "It's dark" or floor shows ' ' not '.' = dark room
-1. If have light source: game_action("apply")
-2. If no light: feel your way - move until wall, follow wall
-3. auto_explore WORKS in dark rooms
-4. memory_add dark room info
-
----
-
-REFERENCE:
+PARTIAL REFERENCE:
 
 MAP SYMBOLS:
-You (@), Pet (letter with *), Monster (letter), Number = invisible monster
+You (@), Pet (letter), Monster (letter), Number = invisible monster
 . floor  # corridor  | - walls  + closed door  < stairs UP  > stairs DOWN
 { fountain  _ altar  ^ trap  $ gold  ) weapon  [ armor  ! potion
 
@@ -214,9 +205,21 @@ NETHACK ESSENTIALS:
 - Stairs up from Dlvl:1 = INSTANT LOSS
 - Diagonal movement saves steps
 - "far <direction>" actions greatly improve movement speed
+- Hidden doors or corridors can be stubborn, requiring many searches
 - Must be DIRECTLY ADJACENT for open, kick, fight actions
 
 [STATUS] line auto-injected each turn.
+
+---
+
+PLAN/TODO LIST:
+
+DETAILED plan for per-level exploration:
+  Include every single discovered room to search
+  Include every single corridor to search
+  Revise with new discoveries!
+  Per-level objective: find stairs down, solve puzzle, ...
+Next long-term objective (descend, ...)
 
 ---
 
@@ -229,4 +232,4 @@ Maximize signal
 
 ---
 
-BENCHMARK GOAL: Maximize Score via dungeon depth, XP, milestones.
+LONGTERM GOALS: Maximize benchmark score via dungeon depth, XP, player progression, milestones, ascension.

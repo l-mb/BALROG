@@ -360,14 +360,17 @@ CORRIDOR_CMAP = {21, 22}
 
 
 # Floor cmap indices for room detection
+# Includes floor tiles plus room features (altar, fountain, sink, throne)
 FLOOR_CMAP = {19, 20}  # S_room, S_darkroom
+ROOM_FEATURE_CMAP = {27, 29, 30, 31}  # altar, throne, sink, fountain
+ROOM_TILE_CMAP = FLOOR_CMAP | ROOM_FEATURE_CMAP
 
 
 def _is_room_tile(glyphs: np.ndarray, x: int, y: int, room_tiles: set[tuple[int, int]]) -> bool:
-    """Check if tile is a floor tile or likely on floor (item/monster on floor).
+    """Check if tile is a room tile or likely on floor (item/monster on floor).
 
-    Items and monsters overlay floor glyphs, so we need to check if they're
-    adjacent to known room tiles to include them in the room.
+    Room tiles include floor, altar, fountain, sink, throne.
+    Items and monsters overlay floor glyphs, so we check adjacency.
     Traps are also included as room tiles (they're on the floor).
     """
     rows, cols = glyphs.shape
@@ -377,8 +380,8 @@ def _is_room_tile(glyphs: np.ndarray, x: int, y: int, room_tiles: set[tuple[int,
     glyph = int(glyphs[y, x])
     cmap_idx = glyph - CMAP_OFF
 
-    # Direct floor glyph
-    if cmap_idx in FLOOR_CMAP:
+    # Direct room tile (floor, altar, fountain, sink, throne)
+    if cmap_idx in ROOM_TILE_CMAP:
         return True
 
     # Traps are on floor tiles - include them in room detection
@@ -390,12 +393,12 @@ def _is_room_tile(glyphs: np.ndarray, x: int, y: int, room_tiles: set[tuple[int,
         for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
             if (x + dx, y + dy) in room_tiles:
                 return True
-        # Also check if adjacent to floor glyph directly
+        # Also check if adjacent to room tile glyph directly
         for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
             nx, ny = x + dx, y + dy
             if 0 <= ny < rows and 0 <= nx < cols:
                 adj_cmap = int(glyphs[ny, nx]) - CMAP_OFF
-                if adj_cmap in FLOOR_CMAP:
+                if adj_cmap in ROOM_TILE_CMAP:
                     return True
 
     return False
@@ -421,23 +424,23 @@ def detect_room(
     if not (0 <= py < rows and 0 <= px < cols):
         return None
 
-    # Player position may not show floor glyph (player/monster/item overlays it)
-    # Seed flood-fill from adjacent floor tiles instead
+    # Player position may not show room glyph (player/monster/item overlays it)
+    # Seed flood-fill from adjacent room tiles instead
     seed_tiles = []
     cmap_idx = int(glyphs[py, px]) - CMAP_OFF
-    if cmap_idx in FLOOR_CMAP:
+    if cmap_idx in ROOM_TILE_CMAP:
         seed_tiles.append((px, py))
     else:
-        # Check adjacent tiles for floor
+        # Check adjacent tiles for room tiles
         for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
             nx, ny = px + dx, py + dy
             if 0 <= ny < rows and 0 <= nx < cols:
                 adj_cmap = int(glyphs[ny, nx]) - CMAP_OFF
-                if adj_cmap in FLOOR_CMAP:
+                if adj_cmap in ROOM_TILE_CMAP:
                     seed_tiles.append((nx, ny))
 
     if not seed_tiles:
-        return None  # Not adjacent to any floor tiles
+        return None  # Not adjacent to any room tiles
 
     # Flood fill from seed tiles, including tiles with items/monsters
     room_tiles: set[tuple[int, int]] = set()
