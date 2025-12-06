@@ -503,14 +503,13 @@ class BraidStorage:
         tool_name: str,
         args: str | None,
         result: str | None,
-        latency_ms: int,
         error: str | None = None,
     ) -> None:
         """Log a tool invocation for debugging and visualization."""
         self.conn.execute(
-            """INSERT INTO tool_calls (timestamp, worker_id, episode, step, tool_name, args, result, latency_ms, error)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (self._now(), self.worker_id, episode, step, tool_name, args, result, latency_ms, error),
+            """INSERT INTO tool_calls (timestamp, worker_id, episode, step, tool_name, args, result, error)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (self._now(), self.worker_id, episode, step, tool_name, args, result, error),
         )
         self.conn.commit()
 
@@ -519,7 +518,7 @@ class BraidStorage:
     ) -> list[dict[str, Any]]:
         """Get recent tool calls for an episode."""
         rows = self.conn.execute(
-            """SELECT id, timestamp, step, tool_name, args, result, latency_ms, error
+            """SELECT id, timestamp, step, tool_name, args, result, error
                FROM tool_calls
                WHERE worker_id = ? AND episode = ?
                ORDER BY id DESC LIMIT ?""",
@@ -533,7 +532,6 @@ class BraidStorage:
                 "tool_name": r["tool_name"],
                 "args": json.loads(r["args"]) if r["args"] else None,
                 "result": r["result"],
-                "latency_ms": r["latency_ms"],
                 "error": r["error"],
             }
             for r in rows

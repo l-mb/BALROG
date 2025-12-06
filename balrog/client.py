@@ -883,6 +883,7 @@ class ClaudeToolWrapper(LLMClientWrapper):
             response_text = ""
             input_tokens = 0
             output_tokens = 0
+            seen_tool_ids: set[str] = set()
 
             await self._client.query(content)
 
@@ -894,6 +895,12 @@ class ClaudeToolWrapper(LLMClientWrapper):
                         # Track tool uses - check class name since SDK uses ToolUseBlock
                         block_type = type(block).__name__
                         if block_type == "ToolUseBlock":
+                            # Use tool ID to deduplicate (SDK may return same tool multiple times)
+                            tool_id = getattr(block, "id", None)
+                            if tool_id and tool_id in seen_tool_ids:
+                                continue
+                            if tool_id:
+                                seen_tool_ids.add(tool_id)
                             tool_call = {
                                 "name": getattr(block, "name", "unknown"),
                                 "input": getattr(block, "input", {}),

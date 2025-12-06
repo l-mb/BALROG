@@ -2,7 +2,7 @@ AVAILABLE TOOLS:
 
 MEMORY TOOLS:
 - memory_add(content, scope, tags, priority) - Store learning/tracking
-  - content: What to remember (max 256 chars)
+  - content: What to remember (max 512 chars)
   - scope: "episode" (current run) or "persistent" (forever)
   - tags: Categories (comma-separated: rule,lvl:1,stairs)
   - priority: 1-9 (higher = shown first in memory list)

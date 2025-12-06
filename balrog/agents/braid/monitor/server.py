@@ -94,9 +94,15 @@ def create_app(db_path: Path) -> Starlette:
                     row_data.append((char, is_visited))
                 screen_rows.append(row_data)
 
-        # Get tool calls and todos
-        tool_calls = db.get_recent_tool_calls(worker_id, current_episode) if current_episode else []
+        # Get todos
         todos = db.get_todos(worker_id, current_episode) if current_episode else []
+
+        # Get tool calls for current step (for conversation panel)
+        step_tool_calls = []
+        if full_response and current_episode is not None:
+            step_tool_calls = db.get_tool_calls_for_step(
+                worker_id, current_episode, full_response.get("step", 0)
+            )
 
         return templates.TemplateResponse(
             request,
@@ -117,7 +123,7 @@ def create_app(db_path: Path) -> Starlette:
                 "sdk_prompt": sdk_prompt,
                 "using_sdk": using_sdk,
                 "visited_count": len(visited),
-                "tool_calls": tool_calls,
+                "step_tool_calls": step_tool_calls,
                 "todos": todos,
             },
         )

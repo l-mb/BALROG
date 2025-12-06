@@ -127,41 +127,6 @@
       </article>
       {% endif %}
 
-      <!-- Tool calls timeline -->
-      {% if tool_calls %}
-      <article class="tool-panel">
-        <header>Tool Calls ({{ tool_calls|length }})</header>
-        <div class="tool-list">
-          <table>
-            <thead>
-              <tr>
-                <th class="col-step">@</th>
-                <th class="col-tool">Tool</th>
-                <th class="col-latency">ms</th>
-                <th class="col-result">Result</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for tc in tool_calls %}
-              <tr class="{% if tc.error %}tool-error{% endif %}">
-                <td class="col-step">{{ tc.step }}</td>
-                <td class="col-tool">
-                  <span class="tool-name">{{ tc.tool_name }}</span>
-                  {% if tc.args %}<span class="tool-args">{{ tc.args|tojson|truncate(50) }}</span>{% endif %}
-                </td>
-                <td class="col-latency">{{ tc.latency_ms or '-' }}</td>
-                <td class="col-result">
-                  {% if tc.error %}<span class="tool-error-msg">{{ tc.error }}</span>
-                  {% elif tc.result %}<pre>{{ tc.result }}</pre>{% else %}-{% endif %}
-                </td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </article>
-      {% endif %}
-
       <article class="conversation-panel">
         <header>
           Conversation
@@ -186,6 +151,29 @@
               {% endif %}
               <pre>{{ sdk_prompt.received }}</pre>
             </div>
+            {% if full_response or step_tool_calls %}
+            <div class="conv-msg conv-actions">
+              <span class="conv-role">⚡ actions & tools</span>
+              <div class="actions-content">
+                {% for tc in step_tool_calls %}
+                <div class="tool-item {% if tc.error %}tool-error{% endif %}">
+                  <span class="tool-label">{{ tc.tool_name }}</span>
+                  {% if tc.args %}
+                  <span class="tool-args">{{ tc.args if tc.args is string else tc.args|tojson }}</span>
+                  {% endif %}
+                  {% if tc.result %}<span class="tool-result">→ {{ tc.result|truncate(120) }}</span>{% endif %}
+                  {% if tc.error %}<span class="tool-error-msg">✗ {{ tc.error }}</span>{% endif %}
+                </div>
+                {% endfor %}
+                {% if full_response and full_response.action %}
+                <div class="action-item">
+                  <span class="action-label">Game action:</span>
+                  <code class="action-value">{{ full_response.action }}</code>
+                </div>
+                {% endif %}
+              </div>
+            </div>
+            {% endif %}
             <div class="conv-msg conv-user">
               <span class="conv-role">→ sent</span>
               <pre>{{ sdk_prompt.sent }}</pre>

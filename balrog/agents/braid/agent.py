@@ -316,13 +316,22 @@ class BRAIDAgent(BaseAgent):
                 logger.info(f"SDK tool calls: {[tc.get('name') for tc in tool_calls]}")
             for tc in tool_calls:
                 tool_name = tc.get("name", "")
+                tool_input = tc.get("input", {})
+                tool_result = tc.get("result")
                 # Save TodoWrite todos
                 if tool_name == "TodoWrite":
-                    todos = tc.get("input", {}).get("todos", [])
+                    todos = tool_input.get("todos", [])
                     if todos:
                         self.storage.save_todos(self.episode_number, self._step, todos)
-                # Log all tool calls for debugging
-                logger.debug(f"Tool call: {tool_name} with {tc.get('input', {})}")
+                # Log all tool calls to storage for Web UI
+                import json
+                self.storage.log_tool_call(
+                    episode=self.episode_number,
+                    step=self._step,
+                    tool_name=tool_name,
+                    args=json.dumps(tool_input) if tool_input else None,
+                    result=str(tool_result)[:500] if tool_result else None,
+                )
 
         # Log SDK incremental prompt (SDK-only, always available)
         self.storage.log_sdk_prompt(

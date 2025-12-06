@@ -415,6 +415,65 @@ body>main.container-fluid {
     border-left: 2px solid #9b59b6;
 }
 
+/* Actions & Tools in conversation */
+.conv-actions {
+    border-left-color: #f39c12;
+    background: rgba(243, 156, 18, 0.08);
+    border-radius: 4px;
+    padding: 0.3rem;
+}
+.conv-actions .conv-role {
+    color: #f39c12;
+}
+
+.actions-content {
+    font-size: 0.6rem;
+}
+
+.action-item {
+    margin-bottom: 0.2rem;
+}
+.action-label {
+    color: var(--pico-muted-color);
+    margin-right: 0.3rem;
+}
+.action-value {
+    background: rgba(243, 156, 18, 0.15);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    font-weight: bold;
+}
+
+.tool-item {
+    margin: 0.15rem 0;
+    padding: 0.15rem 0.3rem;
+    background: var(--pico-card-sectioning-background-color);
+    border-radius: 3px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    align-items: baseline;
+}
+.tool-item.tool-error {
+    background: rgba(231, 76, 60, 0.15);
+}
+.tool-label {
+    font-weight: bold;
+    color: #3498db;
+}
+.tool-args {
+    color: var(--pico-muted-color);
+    font-size: 0.55rem;
+}
+.tool-result {
+    color: #2ecc71;
+    font-size: 0.55rem;
+}
+.tool-error-msg {
+    color: #e74c3c;
+    font-size: 0.55rem;
+}
+
 /* ==========================================================================
    Common Elements
    ========================================================================== */

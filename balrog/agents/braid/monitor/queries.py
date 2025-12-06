@@ -514,6 +514,33 @@ class MonitorDB:
             for r in rows
         ]
 
+    def get_tool_calls_for_step(
+        self, worker_id: str, episode: int, step: int
+    ) -> list[dict]:
+        """Get tool calls for a specific step."""
+        tables = self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='tool_calls'"
+        ).fetchone()
+        if not tables:
+            return []
+
+        rows = self.conn.execute(
+            """SELECT id, tool_name, args, result, error
+               FROM tool_calls
+               WHERE worker_id = ? AND episode = ? AND step = ?
+               ORDER BY id""",
+            (worker_id, episode, step),
+        ).fetchall()
+        return [
+            {
+                "tool_name": r["tool_name"],
+                "args": json.loads(r["args"]) if r["args"] else None,
+                "result": r["result"][:200] if r["result"] else None,
+                "error": r["error"],
+            }
+            for r in rows
+        ]
+
     def get_todos(self, worker_id: str, episode: int) -> list[dict]:
         """Get todos for an episode."""
         # Check if todos table exists
