@@ -34,8 +34,7 @@ SCANNING HELPERS (get precise info):
   <|COMPUTE|>exits<|END|>          - find room exits
 
 OTHER HELPERS:
-  nearest: stairs_down|altar|fountain|sink|throne
-  pathfind: @x1,y1 -> @x2,y2
+  <|COMPUTE|>nearest: stairs_down|altar|fountain|sink|throne<|END> -> return (x, y, distance)
 
 MANUAL ACTIONS (use when helpers fail):
   Directions: north south east west northeast northwest southeast southwest
@@ -113,10 +112,10 @@ MEMORY TAGS (use lvl:N suffix for level-specific, expand as needed):
   frontier,lvl:N    - "@x,y:dir" unexplored directions, note ends of corridors
   searched,lvl:N    - "@x,y n:N" searched N times (stop after 3)
   room,lvl:N        - "@identifier searched:y/n explored:y/n dark:y/n shop:y/n temple:y/n"
-  stairs,lvl:N      - ">x,y" or "<x,y" stair locations
+  stairs,lvl:N      - ">x,y level_type:{dungeon,mines,...}" or "<x,y level_type:{dungeon,sokoban,...}" stair locations
   sink,lvl:N        - "#x,y"
   fountain,lvl:N    - "{x,y"
-  altar,lvl:N       - "_x,y alignment"
+  altar,lvl:N       - "_x,y alignment:... temple:y/n"
   plan              - "GOAL:... NEXT:... STEPS:..." - store with high priority
   rule              - game rules learned
 
@@ -164,6 +163,8 @@ Apply your NetHack knowledge. Store discoveries as persistent rules.
 Map takes precedence over stale memories. Check "blocked" before moving.
 
 Memory and thinking are for agent use only. Disregard all readability, grammar, language concerns.
+
+Keep CAREFUL track of your position on the map.
 
 You MUST have ONE plan. If NO PLAN, think and memorize detailed plan.
 If you HAVE a plan, follow it. Mark achieved todos completed.
