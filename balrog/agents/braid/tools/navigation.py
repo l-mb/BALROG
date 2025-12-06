@@ -32,8 +32,13 @@ def set_context(obs: dict[str, Any], storage: BraidStorage, episode: int) -> Non
     _obs = obs
     _storage = storage
     _episode = episode
-    if obs and "blstats" in obs:
-        _dlvl = int(obs["blstats"][12])
+    # Handle NLE wrapper for blstats
+    if obs:
+        raw_obs = obs.get("obs", obs)
+        if isinstance(raw_obs, dict):
+            blstats = raw_obs.get("blstats", obs.get("blstats"))
+            if blstats is not None:
+                _dlvl = int(blstats[12])
 
 
 def get_pending_actions() -> list[str]:
@@ -49,9 +54,22 @@ def _get_obs_data() -> tuple[np.ndarray, np.ndarray, np.ndarray, tuple[int, int]
     if _obs is None:
         return None
     try:
-        glyphs = _obs["glyphs"]
-        tty_chars = _obs.get("tty_chars", np.zeros_like(glyphs))
-        blstats = _obs["blstats"]
+        # Handle NLE wrapper: obs["obs"] contains the actual data
+        raw_obs = _obs.get("obs", _obs)
+        if not isinstance(raw_obs, dict):
+            raw_obs = _obs
+
+        glyphs = raw_obs.get("glyphs")
+        if glyphs is None:
+            glyphs = _obs.get("glyphs")
+        if glyphs is None:
+            return None
+
+        tty_chars = raw_obs.get("tty_chars", _obs.get("tty_chars", np.zeros_like(glyphs)))
+        blstats = raw_obs.get("blstats", _obs.get("blstats"))
+        if blstats is None:
+            return None
+
         pos = (int(blstats[0]), int(blstats[1]))
         return glyphs, tty_chars, blstats, pos
     except (KeyError, TypeError, IndexError):
