@@ -106,8 +106,10 @@ async def game_action(args: dict[str, Any]) -> dict[str, Any]:
     actions_input = args.get("actions", [])
 
     # Handle both list and string input for robustness
+    # LLMs often pass comma-separated strings instead of proper lists
     if isinstance(actions_input, str):
-        raw_actions = [a.strip() for a in actions_input.strip().split("\n") if a.strip()]
+        import re
+        raw_actions = [a.strip() for a in re.split(r"[,\n]", actions_input) if a.strip()]
     elif isinstance(actions_input, list):
         raw_actions = [str(a).strip() for a in actions_input if str(a).strip()]
     else:
