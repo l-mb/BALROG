@@ -48,7 +48,7 @@ Recording rules (persistent across games):
   memory_add("floating eye: don't melee, use ranged", "persistent", "rule,monster", 8)
   memory_add("always explore full level before descending", "persistent", "rule,strategy", 9)
   memory_add("prayer cooldown ~800 turns", "persistent", "rule,mechanic", 7)
-  USE persistent scope for working strategies, game mechanics learned, commands better understood, dangers discovered.
+  USE persistent scope for working strategies, game/scoring mechanics learned, commands better understood, dangers discovered.
 
 Searching memory:
   memory_search("stairs", "", "", 5)              → find stair locations (all scopes)
@@ -123,10 +123,11 @@ GAME ACTION TOOL:
     game_action("search", "search", "search")         # search 3 times
     game_action("north", "search", "north", "search") # searching while moving
 
-  Far commands (NetHack-native, efficient for corridors):
+  Far commands (NetHack-native, efficient for corridors, works also in rooms):
     game_action("far north")     # move north until blocked/event
     game_action("far southeast") # move diagonally until blocked
     Stops on: wall, monster, item, door, branching corridor, trap
+    USE travel_to() tool INSTEAD when you know exact target coordinates
 
 ---
 

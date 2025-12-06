@@ -617,8 +617,7 @@ def plan_visited_aware_exploration(
         remaining.discard(nearest)
 
         # Limit actions per call to avoid very long queues
-        # Perimeter of typical room is ~20 tiles, each with path + search
-        if len(actions) > 50:
+        if len(actions) > 200:
             break
 
     return actions
