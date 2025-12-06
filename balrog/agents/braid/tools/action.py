@@ -71,23 +71,28 @@ COMPOUND_ACTIONS = {
 
 
 def expand_action(action: str) -> list[str]:
-    """Expand compound action into individual commands."""
-    action = action.strip().lower()
+    """Expand compound action into individual commands.
 
-    # Check compound actions first
-    if action in COMPOUND_ACTIONS:
-        return COMPOUND_ACTIONS[action]
+    Note: Only lowercases known command keywords, preserves case for
+    inventory letters (a-z, A-Z) since they refer to different slots.
+    """
+    action_stripped = action.strip()
+    action_lower = action_stripped.lower()
+
+    # Check compound actions first (these are all lowercase keywords)
+    if action_lower in COMPOUND_ACTIONS:
+        return COMPOUND_ACTIONS[action_lower]
 
     # Handle "open <direction>" pattern dynamically
     for cmd in ["open", "close", "kick", "zap", "throw", "fire"]:
-        if action.startswith(f"{cmd} "):
-            direction = action[len(cmd) + 1 :].strip()
+        if action_lower.startswith(f"{cmd} "):
+            direction = action_lower[len(cmd) + 1 :].strip()
             if direction in COMPOUND_ACTIONS:
                 return [cmd] + COMPOUND_ACTIONS[direction]
             return [cmd, direction]
 
-    # Single action
-    return [action]
+    # Single action - preserve original case for inventory letters
+    return [action_stripped]
 
 
 @tool(
