@@ -22,6 +22,7 @@ SCANNING TOOLS:
 NAVIGATION TOOLS:
 - navigate(command, args) - Query paths and distances
   - command: "nearest" args: "stairs_down|altar|fountain|sink|throne"
+    - ONLY works if you have already discovered the target!
   - command: "distance" args: "@x1,y1 -> @x2,y2"
   - command: "pathfind" args: "@x,y" (from current) or "@x1,y1 -> @x2,y2"
 
@@ -65,8 +66,8 @@ Read-only tools (scan, navigate, memory) can be called freely before your action
 
 WORKFLOW:
 1. Analyze: scan, navigate, memory_search (as many as needed)
-2. Plan: TodoWrite to track strategy
-3. Act: ONE game_action or auto_explore with all intended actions
+2. Plan: TodoWrite to track strategy and level exploration progress
+3. Act: ONE game_action with all intended actions, XOR auto_explore
 4. Wait - all actions execute, then you see the resulting game state
 
 IMPORTANT: Prefer auto_explore for exploration, game_action for targeted sequences.
@@ -81,7 +82,7 @@ DECISION TREE - FOLLOW EVERY TURN:
 2. CHECK LOCATION
    In room (. floor tiles)?
    ├── Room unexplored → auto_explore(mode="room")
-   ├── Room explored → navigate to nearest exit
+   ├── Room explored → navigate to nearest unexplored exit
    └── All done → scan(target="unexplored"), go there
 
    In corridor (# tiles)?
