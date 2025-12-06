@@ -766,6 +766,9 @@ class ClaudeToolWrapper(LLMClientWrapper):
         self._tool_calls: list[dict] = []
         # Connection state
         self._connected = False
+        # Register cleanup on exit
+        import atexit
+        atexit.register(self._force_cleanup)
 
     def set_mcp_server(self, mcp_server) -> None:
         """Set the MCP server with BRAID tools."""
@@ -812,6 +815,33 @@ class ClaudeToolWrapper(LLMClientWrapper):
         self._connected = False
         logger.info(f"ClaudeTools client created: model={self.model_id}, thinking={thinking_budget}")
 
+    def _force_cleanup(self):
+        """Force kill any subprocess - called on exit/interrupt."""
+        if self._client is None:
+            return
+        # Access the transport's subprocess directly and kill it
+        try:
+            transport = getattr(self._client, "_transport", None)
+            if transport:
+                process = getattr(transport, "_process", None)
+                if process and process.returncode is None:
+                    import signal
+                    import os
+                    # Send SIGTERM, then SIGKILL if needed
+                    try:
+                        os.kill(process.pid, signal.SIGTERM)
+                    except (ProcessLookupError, OSError):
+                        pass
+                    logger.info(f"Force-killed Claude subprocess (pid={process.pid})")
+        except Exception as e:
+            logger.debug(f"Error in force cleanup: {e}")
+        self._client = None
+        self._connected = False
+
+    def __del__(self):
+        """Destructor - ensure subprocess is killed."""
+        self._force_cleanup()
+
     def close_session(self):
         """Close current session (call at episode end)."""
         if self._client and self._loop:
@@ -820,9 +850,15 @@ class ClaudeToolWrapper(LLMClientWrapper):
                 await self._client.disconnect()
 
             try:
-                self._loop.run_until_complete(_disconnect())
+                # Use short timeout to avoid hanging
+                import asyncio
+                self._loop.run_until_complete(asyncio.wait_for(_disconnect(), timeout=2.0))
+            except asyncio.TimeoutError:
+                logger.warning("ClaudeTools disconnect timed out, force killing")
+                self._force_cleanup()
             except Exception as e:
                 logger.warning(f"Error closing ClaudeTools session: {e}")
+                self._force_cleanup()
             self._client = None
         self._llm_call_count = 0
         self._conversation_history = []
