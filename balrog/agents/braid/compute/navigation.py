@@ -720,20 +720,10 @@ def plan_visited_aware_exploration(
 
     # Find perimeter tiles (wall-adjacent) for searching
     perimeter = set(_find_perimeter(walkable_tiles))
-    unvisited_perimeter = perimeter - visited
 
-    # For corridors (narrow, most tiles are perimeter), visit ALL unvisited
-    # For rooms, prioritize perimeter for secret door searches
-    is_corridor_like = len(perimeter) > len(walkable_tiles) * 0.7
-
-    if is_corridor_like:
-        # Corridors: visit all unvisited tiles
-        targets = unvisited
-    elif unvisited_perimeter:
-        # Rooms: prioritize unvisited perimeter
-        targets = unvisited_perimeter
-    else:
-        targets = unvisited
+    # Visit ALL unvisited tiles for both rooms and corridors
+    # Perimeter detection is only used for adding search actions, not filtering targets
+    targets = unvisited
 
     # BFS tour through targets, using visited as known-walkable
     # Combine visited (confirmed) + walkable_tiles (visible) for pathfinding

@@ -160,7 +160,7 @@ DECISION TREE - FOLLOW EVERY TURN:
 ---
 
 FAILURE RECOVERY:
-  "no path" → door blocking? open it. Manual moves around obstacle.
+  "no path" → door blocking? open it. Manual moves around or through obstacle. Your pet or a monster could be in the way.
   "NOT IN ROOM" → try auto_explore(mode="corridor")
   "NOT IN CORRIDOR" → try auto_explore(mode="room")
   Stuck 3+ turns → try different direction
