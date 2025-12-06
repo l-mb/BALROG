@@ -200,6 +200,40 @@ class MonitorDB:
             }
         return None
 
+    def get_sdk_prompt_history(
+        self, worker_id: str, episode: int, max_step: int | None = None, limit: int = 20
+    ) -> list[dict]:
+        """Get SDK prompt history for an episode (newest first).
+
+        Returns list of {step, sent, received} for each LLM turn.
+        """
+        if max_step is not None:
+            rows = self.conn.execute(
+                """SELECT step, data FROM journal
+                   WHERE worker_id = ? AND event = 'sdk_prompt'
+                         AND json_extract(data, '$.episode') = ? AND step <= ?
+                   ORDER BY step DESC LIMIT ?""",
+                (worker_id, episode, max_step, limit),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                """SELECT step, data FROM journal
+                   WHERE worker_id = ? AND event = 'sdk_prompt'
+                   ORDER BY step DESC LIMIT ?""",
+                (worker_id, limit),
+            ).fetchall()
+
+        result = []
+        for row in rows:
+            if row["data"]:
+                data = json.loads(row["data"])
+                result.append({
+                    "step": row["step"],
+                    "sent": data.get("sent", ""),
+                    "received": data.get("received", ""),
+                })
+        return result
+
     def is_using_sdk(self, worker_id: str) -> bool:
         """Check if agent is using claude-sdk (has sdk_prompt events)."""
         row = self.conn.execute(
@@ -540,6 +574,40 @@ class MonitorDB:
             }
             for r in rows
         ]
+
+    def get_tool_calls_by_step(
+        self, worker_id: str, episode: int, limit: int = 50
+    ) -> dict[int, list[dict]]:
+        """Get tool calls grouped by step for an episode."""
+        tables = self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='tool_calls'"
+        ).fetchone()
+        if not tables:
+            return {}
+
+        rows = self.conn.execute(
+            """SELECT step, tool_name, args, result, error
+               FROM tool_calls
+               WHERE worker_id = ? AND episode = ?
+               ORDER BY id DESC LIMIT ?""",
+            (worker_id, episode, limit),
+        ).fetchall()
+
+        by_step: dict[int, list[dict]] = {}
+        for r in rows:
+            step = r["step"]
+            if step not in by_step:
+                by_step[step] = []
+            by_step[step].append({
+                "tool_name": r["tool_name"],
+                "args": json.loads(r["args"]) if r["args"] else None,
+                "result": r["result"][:200] if r["result"] else None,
+                "error": r["error"],
+            })
+        # Reverse each step's list since we queried DESC
+        for step in by_step:
+            by_step[step] = list(reversed(by_step[step]))
+        return by_step
 
     def get_todos(self, worker_id: str, episode: int) -> list[dict]:
         """Get todos for an episode."""

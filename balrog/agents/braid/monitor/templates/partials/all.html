@@ -130,32 +130,28 @@
       <article class="conversation-panel">
         <header>
           Conversation
-          {% if using_sdk and sdk_prompt %}
-          (SDK, step {{ sdk_prompt.step }}, {{ sdk_prompt.history|length }} msgs)
+          {% if using_sdk and sdk_history %}
+          (SDK, {{ sdk_history|length }} turns)
           {% elif full_prompt %}
           (step {{ full_prompt.step }}, {{ full_prompt.messages|length }} msgs)
           {% endif %}
           {% if full_response %} · {{ full_response.in_tok }}/{{ full_response.out_tok }} tok{% endif %}
         </header>
         <div class="conversation-content">
-          {% if using_sdk and sdk_prompt %}
-          <!-- SDK: Show latest turn prominently, then history newest-first -->
-          <div class="conv-turn conv-latest">
+          {% if using_sdk and sdk_history %}
+          <!-- SDK: Show all turns with their tool calls (newest first) -->
+          {% for turn in sdk_history %}
+          <div class="conv-turn {% if loop.first %}conv-latest{% endif %}">
             <div class="conv-msg conv-assistant">
-              <span class="conv-role">← assistant</span>
-              {% if full_response and full_response.extended_thinking %}
-              <details class="conv-thinking">
-                <summary>thinking...</summary>
-                <pre>{{ full_response.extended_thinking }}</pre>
-              </details>
-              {% endif %}
-              <pre>{{ sdk_prompt.received }}</pre>
+              <span class="conv-role">← assistant (step {{ turn.step }})</span>
+              <pre>{{ turn.received }}</pre>
             </div>
-            {% if full_response or step_tool_calls %}
+            {% set step_tools = tool_calls_by_step.get(turn.step, []) %}
+            {% if step_tools %}
             <div class="conv-msg conv-actions">
               <span class="conv-role">⚡ actions & tools</span>
               <div class="actions-content">
-                {% for tc in step_tool_calls %}
+                {% for tc in step_tools %}
                 <div class="tool-item {% if tc.error %}tool-error{% endif %}">
                   <span class="tool-label">{{ tc.tool_name }}</span>
                   {% if tc.args %}
@@ -165,29 +161,18 @@
                   {% if tc.error %}<span class="tool-error-msg">✗ {{ tc.error }}</span>{% endif %}
                 </div>
                 {% endfor %}
-                {% if full_response and full_response.action %}
-                <div class="action-item">
-                  <span class="action-label">Game action:</span>
-                  <code class="action-value">{{ full_response.action }}</code>
-                </div>
-                {% endif %}
               </div>
             </div>
             {% endif %}
             <div class="conv-msg conv-user">
               <span class="conv-role">→ sent</span>
-              <pre>{{ sdk_prompt.sent }}</pre>
+              <pre>{{ turn.sent }}</pre>
             </div>
           </div>
-          {% if sdk_prompt.history|length > 2 %}
-          <div class="conv-separator">── previous turns ──</div>
-          {% for msg in sdk_prompt.history[2:] %}
-          <div class="conv-msg conv-{{ msg.role }}">
-            <span class="conv-role">{{ msg.role }}</span>
-            <pre>{{ msg.content }}</pre>
-          </div>
-          {% endfor %}
+          {% if not loop.last %}
+          <div class="conv-separator">──</div>
           {% endif %}
+          {% endfor %}
           {% elif full_prompt and full_prompt.messages %}
           <!-- Traditional: Show messages, newest at top -->
           {% if full_response and full_response.extended_thinking %}

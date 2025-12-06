@@ -69,7 +69,7 @@ def create_app(db_path: Path) -> Starlette:
         # Get full prompt and response for debug panel (filter by episode)
         # Check if using SDK for incremental prompt view
         using_sdk = db.is_using_sdk(worker_id)
-        sdk_prompt = db.get_latest_sdk_prompt(worker_id, max_step=current_step) if using_sdk else None
+        sdk_history = db.get_sdk_prompt_history(worker_id, current_episode, max_step=current_step) if using_sdk and current_episode else []
         full_prompt = db.get_latest_prompt(worker_id, max_step=current_step)
         full_response = db.get_latest_full_response(
             worker_id, max_step=current_step, episode=current_episode
@@ -97,12 +97,10 @@ def create_app(db_path: Path) -> Starlette:
         # Get todos
         todos = db.get_todos(worker_id, current_episode) if current_episode else []
 
-        # Get tool calls for current step (for conversation panel)
-        step_tool_calls = []
-        if full_response and current_episode is not None:
-            step_tool_calls = db.get_tool_calls_for_step(
-                worker_id, current_episode, full_response.get("step", 0)
-            )
+        # Get tool calls grouped by step (for all conversation history)
+        tool_calls_by_step: dict[int, list] = {}
+        if current_episode is not None:
+            tool_calls_by_step = db.get_tool_calls_by_step(worker_id, current_episode)
 
         return templates.TemplateResponse(
             request,
@@ -120,10 +118,10 @@ def create_app(db_path: Path) -> Starlette:
                 "max_step": max_step,
                 "full_prompt": full_prompt,
                 "full_response": full_response,
-                "sdk_prompt": sdk_prompt,
+                "sdk_history": sdk_history,
                 "using_sdk": using_sdk,
                 "visited_count": len(visited),
-                "step_tool_calls": step_tool_calls,
+                "tool_calls_by_step": tool_calls_by_step,
                 "todos": todos,
             },
         )
