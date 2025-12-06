@@ -85,6 +85,15 @@
     let currentStep = null;  // null = latest
     let maxStep = 0;
 
+    function triggerRefresh() {
+      const panels = document.getElementById('panels');
+      const url = panels.getAttribute('hx-get');
+      // Set flag to bypass interaction pause for this manual refresh
+      manualRefreshInProgress = true;
+      // Directly make the htmx request instead of relying on trigger events
+      htmx.ajax('GET', url, {target: '#panels', swap: 'innerHTML'});
+    }
+
     function selectAgent(agentId) {
       selectedAgent = agentId;
       currentStep = null;  // Reset to latest when switching agents
@@ -95,8 +104,7 @@
       url.searchParams.set('agent', agentId);
       window.history.replaceState({}, '', url);
       // Trigger immediate refresh
-      const panels = document.getElementById('panels');
-      htmx.trigger(panels, 'load');
+      triggerRefresh();
     }
 
     function toggleAutoRefresh(enabled) {
@@ -109,7 +117,8 @@
         currentStep = null;
         updatePanelsUrl();
       } else {
-        panels.setAttribute('hx-trigger', 'load');
+        // Disable polling - manual refresh via triggerRefresh() using htmx.ajax
+        panels.setAttribute('hx-trigger', 'none');
         if (stepNavEl) stepNavEl.classList.remove('hidden');
       }
       htmx.process(panels);
@@ -131,8 +140,7 @@
       }
       updatePanelsUrl();
       // Trigger immediate refresh
-      const panels = document.getElementById('panels');
-      htmx.trigger(panels, 'load');
+      triggerRefresh();
     }
 
     function updateStepDisplay() {
@@ -217,16 +225,21 @@
     let memoryScope = 'all';
     let showDeleted = false;
 
-    // Interaction pause - prevent refresh during user interaction
+    // Interaction pause - prevent auto-refresh during user interaction
     let interactionPauseUntil = 0;
     const INTERACTION_PAUSE_MS = 2000;
+    let manualRefreshInProgress = false;  // Flag to bypass pause for manual refreshes
 
     function pauseRefresh() {
       interactionPauseUntil = Date.now() + INTERACTION_PAUSE_MS;
     }
 
-    // Block htmx requests while user is interacting
+    // Block htmx requests while user is interacting (but allow manual refreshes)
     document.body.addEventListener('htmx:beforeRequest', function(evt) {
+      if (manualRefreshInProgress) {
+        manualRefreshInProgress = false;  // Reset flag
+        return;  // Allow this request
+      }
       if (Date.now() < interactionPauseUntil) {
         evt.preventDefault();
       }
