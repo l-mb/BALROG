@@ -173,10 +173,14 @@ class BRAIDAgent(BaseAgent):
                 # Check for newly discovered traps and re-plan if needed
                 self._check_and_replan_for_traps(obs)
                 self._step += 1
-                # Log position for queued action
+                # Log position and screen for queued action (for Web UI)
+                queued_dlvl: int | None = None
                 if pos_info:
-                    x, y, dlvl = pos_info
-                    self.storage.log_position(self.episode_number, self._step, dlvl, x, y)
+                    x, y, queued_dlvl = pos_info
+                    self.storage.log_position(self.episode_number, self._step, queued_dlvl, x, y)
+                screen = self._extract_screen(obs)
+                if screen:
+                    self.storage.log_screen(self.episode_number, self._step, screen, dlvl=queued_dlvl)
                 action_response = self._pop_queued_action()
                 # Log queued action
                 self.storage.log_response(
@@ -204,9 +208,13 @@ class BRAIDAgent(BaseAgent):
             if self._auto_continue_exploration(obs):
                 # Queue was refilled, process from queue
                 self._step += 1
+                cont_dlvl: int | None = None
                 if pos_info:
-                    x, y, dlvl = pos_info
-                    self.storage.log_position(self.episode_number, self._step, dlvl, x, y)
+                    x, y, cont_dlvl = pos_info
+                    self.storage.log_position(self.episode_number, self._step, cont_dlvl, x, y)
+                screen = self._extract_screen(obs)
+                if screen:
+                    self.storage.log_screen(self.episode_number, self._step, screen, dlvl=cont_dlvl)
                 action_response = self._pop_queued_action()
                 self.storage.log_response(
                     episode=self.episode_number,
