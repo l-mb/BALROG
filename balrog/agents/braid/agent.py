@@ -109,6 +109,9 @@ class BRAIDAgent(BaseAgent):
         # Current game turn (from blstats) for correcting actlog entries
         self._current_game_turn: int | None = None
 
+        # Queue abort notification (shown to LLM on next prompt)
+        self._queue_abort_msg: str | None = None
+
         # Memory refresh interval (include memory in system prompt every N LLM calls)
         self._memory_refresh_interval: int = 100
 
@@ -163,11 +166,15 @@ class BRAIDAgent(BaseAgent):
 
         # Check action queue first - return queued action if available and safe
         if self._action_queue:
-            if self._should_abort_queue(obs):
+            abort_reason = self._should_abort_queue(obs)
+            if abort_reason:
+                remaining = len(self._action_queue)
                 self.storage.log_error(
                     self.episode_number, self._step,
-                    f"Queue aborted ({len(self._action_queue)} actions remaining)"
+                    f"Queue aborted ({remaining} actions remaining): {abort_reason}"
                 )
+                # Store abort message for next LLM prompt
+                self._queue_abort_msg = f"[QUEUE ABORTED: {abort_reason}. {remaining} queued actions cancelled. You must decide what to do next.]"
                 self._clear_batch_state()
             else:
                 # Check for newly discovered traps and re-plan if needed
@@ -388,6 +395,11 @@ class BRAIDAgent(BaseAgent):
             self._current_game_turn = int(blstats[20])
             sections.append(f"[STATUS] {format_status(blstats)}")
 
+        # Inject queue abort notification if queue was just aborted
+        if self._queue_abort_msg:
+            sections.append(self._queue_abort_msg)
+            self._queue_abort_msg = None  # Clear after use
+
         # Inject compute results if available
         if self._compute_result:
             sections.append(self._compute_result)
@@ -600,10 +612,13 @@ class BRAIDAgent(BaseAgent):
         }
         return action.lower() in directions
 
-    def _should_abort_queue(self, obs: dict[str, Any]) -> bool:
-        """Check if action queue should be aborted based on observation."""
+    def _should_abort_queue(self, obs: dict[str, Any]) -> str | None:
+        """Check if action queue should be aborted based on observation.
+
+        Returns abort reason string if should abort, None otherwise.
+        """
         if not self._action_queue:
-            return False
+            return None
 
         # Safety limit: abort if explore_room/corridor exceeds max actions
         if self._batch_source in ("explore_room", "explore_corridor"):
@@ -612,19 +627,19 @@ class BRAIDAgent(BaseAgent):
                     self.episode_number, self._step,
                     f"Explore limit reached: {self._batch_executed} actions"
                 )
-                return True
+                return f"Explore limit reached ({self._batch_executed} actions)"
 
         text = obs.get("text", {}).get("long_term_context", "")
         text_lower = text.lower()
 
         # Abort on interactive prompts
         if self._is_interactive_prompt(text):
-            return True
+            return "Interactive prompt detected"
 
         # Abort on hunger warnings (Hungry, Weak, Fainting)
         hunger_patterns = ["hungry", "weak", "fainting", "faint from lack of food"]
         if any(p in text_lower for p in hunger_patterns):
-            return True
+            return "Hunger warning"
 
         # Pet interactions are normal, don't abort
         pet_patterns = ["swap places", "your kitten", "your cat", "your dog", "your pony",
@@ -634,23 +649,23 @@ class BRAIDAgent(BaseAgent):
         # Abort on combat indicators (but not pet-related)
         combat_patterns = ["hits", "misses", "bites", "attacks", "throws", "swings"]
         if any(p in text_lower for p in combat_patterns) and not is_pet_interaction:
-            return True
+            return "Combat detected"
 
         # Abort on significant HP drop (>20% since queue started)
         if self._queue_start_hp:
             current_hp = self._extract_hp(obs)
             if current_hp is not None and current_hp < self._queue_start_hp * 0.8:
-                return True
+                return "HP dropped significantly"
 
         # Abort on danger indicators
         danger_patterns = ["cursed", "poisoned", "confused", "blind", "stuck", "paralyzed"]
         if any(p in text_lower for p in danger_patterns):
-            return True
+            return "Status effect detected"
 
         # Abort on trap trigger (but not just seeing "trap" in text)
         trap_triggers = ["trigger a", "fall into", "step on a", "you are caught"]
         if any(p in text_lower for p in trap_triggers):
-            return True
+            return "Trap triggered"
 
         # Cautious mode: abort on nearby map discovery (new glyphs appearing close to player)
         if self._cautious_mode and self._last_glyphs is not None:
@@ -683,15 +698,16 @@ class BRAIDAgent(BaseAgent):
                             break
 
                     if nearby_reveal:
+                        tiles_count = int(np.sum(newly_revealed))
                         self.storage.log_error(
                             self.episode_number, self._step,
-                            f"Cautious abort: {np.sum(newly_revealed)} tiles revealed nearby"
+                            f"Cautious abort: {tiles_count} tiles revealed nearby"
                         )
-                        return True
+                        return f"New tiles discovered nearby ({tiles_count} tiles)"
                 # Update snapshot
                 self._last_glyphs = glyphs.copy()
 
-        return False
+        return None
 
     def _check_and_replan_for_traps(self, obs: dict[str, Any]) -> bool:
         """Check if new traps discovered and re-plan exploration if needed.

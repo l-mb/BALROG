@@ -44,7 +44,7 @@ GAME ACTION TOOL:
 
 WORKFLOW - ALWAYS USE TOOLS:
 1. FIRST: Use scan(target="exits") or scan(target="unexplored") to assess the map
-2. Use TodoWrite to track your plan (required for complex exploration)
+2. Use TodoWrite to track your detailed, well-thought out plan (required for complex exploration)
 3. Use auto_explore(mode="room") or auto_explore(mode="corridor") for efficient movement
 4. Use navigate(command="pathfind") to find paths to specific locations
 5. Use game_action ONLY for simple single moves or when auto_explore isn't appropriate
@@ -114,7 +114,6 @@ MEMORY TAGS (use lvl:N suffix for level-specific):
   room,lvl:N        - "@identifier explored:y/n dark:y/n shop:y/n"
   corridor,lvl:N    - "@x1,y1-x2,y2 explored:y/n"
   stairs,lvl:N      - ">x,y" or "<x,y" stair locations
-  plan              - "GOAL:... NEXT:..." high priority
   rule              - game rules learned
 
 SAVE AS PERSISTENT RULE when:
