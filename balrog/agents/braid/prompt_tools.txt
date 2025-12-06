@@ -75,7 +75,8 @@ SCANNING TOOLS:
   Returns positions and distances sorted by proximity
 
 - show_visited_map() - Show ASCII map with visited tiles marked as █
-  Unvisited tiles keep original glyph. Use when:
+  Unvisited tiles keep original glyph, indicating coordinates to explore from!
+  Use when:
   - Level seems explored but no stairs found
   - Want to verify complete room/corridor coverage
   - Planning systematic search of missed areas
@@ -115,6 +116,7 @@ EXPLORATION TOOLS:
   - cautious: true to abort on any new tile discovery, false only aborts on triggers
   Aborts on combat, HP drop, traps, or hunger.
   For corridors, use game_action("far <direction>") instead.
+  "far ..." will skip past junctions, you will have to explore these later!
 
 ---
 
@@ -146,6 +148,8 @@ DECISION TREE - FOLLOW EVERY TURN:
    Message "It's dark"? → go to DARK ROOM section
 
 2. CHECK LOCATION
+   Not all NetHack floors are regular dungeon levels!
+
    In room (. floor tiles)?
    ├── Room unexplored → auto_explore()
    ├── Room explored → navigate to nearest unexplored exit
@@ -155,7 +159,7 @@ DECISION TREE - FOLLOW EVERY TURN:
    ├── Corridor continues → game_action("far north") (stops at junction/door/end)
    ├── At junction → pick unexplored branch, game_action("far <direction>")
    ├── Dead end → game_action("search", "search", "search", ...), backtrack
-   └── Memorize explored corridors and junctions
+   └── Memorize explored corridors and junctions, use TODO list as well!
 
    Next to closed door (+)?
    ├── Closed → game_action("open north") etc
@@ -204,9 +208,10 @@ NETHACK ESSENTIALS:
 - Gold, scrolls, potions, wands have AUTO-PICKUP enabled
 - Stairs up from Dlvl:1 = INSTANT LOSS
 - Diagonal movement saves steps
-- "far <direction>" actions greatly improve movement speed
+- Sometimes, areas may ONLY be connected via diagonal movement!
+- "far <direction>" actions greatly improve movement speed, but skip past branches
 - Hidden doors or corridors can be stubborn, requiring many searches
-- Must be DIRECTLY ADJACENT for open, kick, fight actions
+- Must be DIRECTLY ADJACENT and PROPERLY ALIGNED for open, kick, fight actions
 
 [STATUS] line auto-injected each turn.
 
@@ -216,7 +221,7 @@ PLAN/TODO LIST:
 
 DETAILED plan for per-level exploration:
   Include every single discovered room to search
-  Include every single corridor to search
+  Include every single corridor and junction to search
   Revise with new discoveries!
   Per-level objective: find stairs down, solve puzzle, ...
 Next long-term objective (descend, ...)
