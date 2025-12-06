@@ -804,7 +804,9 @@ class ClaudeToolWrapper(LLMClientWrapper):
                 options_kwargs["allowed_tools"] = ["mcp__braid__*", "TodoWrite"]
                 # Bypass permissions for headless operation - our tools are safe
                 options_kwargs["permission_mode"] = "bypassPermissions"
-                logger.info("ClaudeTools: MCP server configured with BRAID tools")
+                logger.info(f"ClaudeTools: MCP server configured: {self._mcp_server}")
+            else:
+                logger.warning("ClaudeTools: NO MCP server configured - tools will not be available!")
 
             options = ClaudeAgentOptions(**options_kwargs)
             self._client = ClaudeSDKClient(options)
@@ -889,8 +891,9 @@ class ClaudeToolWrapper(LLMClientWrapper):
                     for block in msg.content:
                         if hasattr(block, "text"):
                             response_text += block.text
-                        # Track tool uses
-                        if hasattr(block, "type") and block.type == "tool_use":
+                        # Track tool uses - check class name since SDK uses ToolUseBlock
+                        block_type = type(block).__name__
+                        if block_type == "ToolUseBlock":
                             tool_call = {
                                 "name": getattr(block, "name", "unknown"),
                                 "input": getattr(block, "input", {}),

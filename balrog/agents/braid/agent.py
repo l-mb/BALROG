@@ -294,13 +294,20 @@ class BRAIDAgent(BaseAgent):
                 self._batch_executed = 0
             logger.debug(f"Tools queued {len(tool_actions)} actions")
 
-        # Extract and save TodoWrite calls from SDK tool calls
+        # Extract and save tool calls from SDK
         if hasattr(self.client, "get_tool_calls"):
-            for tc in self.client.get_tool_calls():
-                if tc.get("name") == "TodoWrite":
+            tool_calls = self.client.get_tool_calls()
+            if tool_calls:
+                logger.info(f"SDK tool calls: {[tc.get('name') for tc in tool_calls]}")
+            for tc in tool_calls:
+                tool_name = tc.get("name", "")
+                # Save TodoWrite todos
+                if tool_name == "TodoWrite":
                     todos = tc.get("input", {}).get("todos", [])
                     if todos:
                         self.storage.save_todos(self.episode_number, self._step, todos)
+                # Log all tool calls for debugging
+                logger.debug(f"Tool call: {tool_name} with {tc.get('input', {})}")
 
         # Log SDK incremental prompt (SDK-only, always available)
         self.storage.log_sdk_prompt(

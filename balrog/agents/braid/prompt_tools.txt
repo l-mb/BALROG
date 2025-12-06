@@ -42,14 +42,17 @@ GAME ACTION TOOL:
   Compound: "open north", "kick east", "fight south"
   Commands: search, pickup, eat, pray, wait, apply, read, zap, throw
 
-WORKFLOW:
-1. Assess situation with scan tools if needed
-2. Think and use the Todo tool to make and keep track of your plan
-3. Use memory tools as needed
-4. Use navigate/auto_explore for efficient movement
-5. Use game_action for direct commands
+WORKFLOW - ALWAYS USE TOOLS:
+1. FIRST: Use scan(target="exits") or scan(target="unexplored") to assess the map
+2. Use TodoWrite to track your plan (required for complex exploration)
+3. Use auto_explore(mode="room") or auto_explore(mode="corridor") for efficient movement
+4. Use navigate(command="pathfind") to find paths to specific locations
+5. Use game_action ONLY for simple single moves or when auto_explore isn't appropriate
+6. Use memory_add to record important discoveries
 
-Tools execute automatically. Response text is for reasoning only.
+IMPORTANT: Prefer auto_explore over manual game_action sequences.
+auto_explore queues many actions efficiently and handles wall-following.
+Tools execute automatically - your text response is for reasoning only.
 
 DECISION TREE - FOLLOW EVERY TURN:
 
