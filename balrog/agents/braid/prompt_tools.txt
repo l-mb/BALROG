@@ -6,7 +6,9 @@ You get ONE game-state-changing action per turn.
 - Read-only tools (scan, navigate, memory_*) have no limit
 
 ✓ CORRECT: game_action("north", "east", "pickup") → all execute, you see final state
-✗ WRONG: game_action("north") then game_action("east") → only "north" executes
+✗ WRONG: game_action("north, east, pickup") INCORRECT SYNTAX
+✓ CORRECT: game_action("fight north") → command with parameter
+✗ WRONG: game_action("north") AND game_action("east") → only "north" executes
 
 WORKFLOW EACH TURN:
 0. First turn: memory_search("", "", "persistent", 50) for prior learnings
@@ -47,7 +49,7 @@ Recording rules (persistent across games):
   memory_add("floating eye: don't melee, use ranged", "persistent", "rule,monster", 8)
   memory_add("always explore full level before descending", "persistent", "rule,strategy", 9)
   memory_add("prayer cooldown ~800 turns", "persistent", "rule,mechanic", 7)
-  USE persistent scope for working strategies, game mechanics learned, dangers discovered.
+  USE persistent scope for working strategies, game mechanics learned, commands better understood, dangers discovered.
 
 Searching memory:
   memory_search("stairs", "", "", 5)              → find stair locations (all scopes)
@@ -113,13 +115,14 @@ GAME ACTION TOOL:
 - game_action(actions...) - Execute NetHack command(s) in sequence
   Pass multiple actions as list: game_action("north", "east", "pickup")
   Compound actions: "open north", "kick east", "fight south"
-  Commands: search, pickup, eat, pray, wait, apply, read, zap, throw
+  Commands: see list at top
 
   Examples:
     game_action("north")                           # single move
     game_action("north", "north", "east")          # path to location
     game_action("open east", "east", "pickup")     # open door, enter, grab item
     game_action("search", "search", "search")      # search 3 times
+    game_action("north", "search", "northwest", "search") # Movement & search combination
 
 ---
 
@@ -144,7 +147,8 @@ DECISION TREE - FOLLOW EVERY TURN:
 
    Next to closed door (+)?
    ├── Closed → game_action("open north") etc
-   └── Locked → game_action("kick north")
+   ├── Resisting → Retry game_action("open north"), quieter/safer than kicking
+   └── Locked → game_action("kick north"), unlock if you have a key
 
 3. CHECK THREATS
    Monster visible? → assess threat level, flee or fight
@@ -154,6 +158,7 @@ DECISION TREE - FOLLOW EVERY TURN:
 4. CHECK OPPORTUNITIES
    Item on ground? → game_action("pickup")
    Stairs down or other dungeon features visible? → memory_add location, continue exploring
+   Level appears fully explored, but no stairs? → make detailed plan to re-search along walls, corridors
    Level fully explored? → travel to stairs down, descend
 
 ---
