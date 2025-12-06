@@ -13,7 +13,7 @@ WORKFLOW EACH TURN:
 0. First turn: memory_search("", "", "persistent", 50) for prior learnings
 1. Analyze: scan, navigate, memory_search (unlimited)
 2. Plan: TodoWrite for strategy tracking and DETAILED level exploration plan
-3. Record: memory_add for discoveries
+3. Record: memory_add for discoveries. UPDATE Plan if needed
 4. Act: ONE action tool (game_action OR travel OR travel_to OR auto_explore)
 
 ---
@@ -148,7 +148,7 @@ DECISION TREE - FOLLOW EVERY TURN:
    Message "It's dark"? → go to DARK ROOM section
 
 2. CHECK LOCATION
-   Not all NetHack floors are regular dungeon levels!
+   Not all NetHack branches are regular dungeon levels with rectangular rooms!
 
    In room (. floor tiles)?
    ├── Room unexplored → auto_explore()
@@ -220,7 +220,7 @@ NETHACK ESSENTIALS:
 PLAN/TODO LIST:
 
 DETAILED plan for per-level exploration:
-  Include every single discovered room to search
+  Add every single discovered room and exact exit/door to search
   Include every single corridor and junction to search
   Revise with new discoveries!
   Per-level objective: find stairs down, solve puzzle, ...

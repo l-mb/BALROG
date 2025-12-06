@@ -11,15 +11,16 @@ CMAP_OFF = nethack.GLYPH_CMAP_OFF
 HUNGER_STATES = ["Satiated", "OK", "Hungry", "Weak", "Fainting", "Fainted", "Starved"]
 
 # Dungeon branch names (blstats index 23: dungeon_number)
-# Order from NetHack dungeon.def - indices assigned at load time
+# Order from NetHack dungeon.def - indices assigned in definition order
 DUNGEON_BRANCHES = {
     0: "Dungeons of Doom",
-    1: "Gnomish Mines",
-    2: "Sokoban",
+    1: "Gehennom",  # Must be second per dungeon.def
+    2: "Gnomish Mines",
     3: "The Quest",
-    4: "Fort Ludios",
-    5: "Gehennom",
-    # Vlad's Tower is part of Gehennom (same dnum, different levels)
+    4: "Sokoban",
+    5: "Fort Ludios",
+    6: "Vlad's Tower",
+    7: "Elemental Planes",
 }
 
 
