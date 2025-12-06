@@ -73,6 +73,12 @@ SCANNING TOOLS:
 - scan(target) - View map entities. Target: monsters, items, traps, exits, unexplored
   Returns positions and distances sorted by proximity
 
+- show_visited_map() - Show ASCII map with visited tiles marked as █
+  Unvisited tiles keep original glyph. Use when:
+  - Level seems explored but no stairs found
+  - Want to verify complete room/corridor coverage
+  - Planning systematic search of missed areas
+
 ---
 
 NAVIGATION TOOLS:
@@ -163,7 +169,7 @@ DECISION TREE - FOLLOW EVERY TURN:
 4. CHECK OPPORTUNITIES
    Item on ground? → game_action("pickup")
    Stairs down or other dungeon features visible? → memory_add location, continue exploring
-   Level appears fully explored, but no stairs? → make detailed plan to re-search along walls, corridors
+   Level appears fully explored, but no stairs? → show_visited_map() to find gaps, then search missed areas
    Level fully explored? → travel to stairs down, descend
 
 ---
