@@ -337,15 +337,15 @@ async def travel(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "auto_explore",
-    "Queue exploration actions for current room or corridor. Automatically walks to all reachable tiles. "
+    "Queue exploration actions for current room. Automatically walks to all reachable floor tiles. "
+    "For corridors, use game_action('far <direction>') or travel() instead. "
     "Aborts on combat, HP drop, or hunger.",
     {
-        "mode": str,  # "room" or "corridor"
         "cautious": bool,  # abort on new tile discovery (for secret door hunting)
     },
 )
 async def auto_explore(args: dict[str, Any]) -> dict[str, Any]:
-    """Queue exploration actions for room or corridor."""
+    """Queue exploration actions for room."""
     global _pending_actions, _action_tools_called
 
     _action_tools_called.append("auto_explore")
@@ -355,48 +355,24 @@ async def auto_explore(args: dict[str, Any]) -> dict[str, Any]:
         return {"content": [{"type": "text", "text": "ERROR: No observation available"}], "is_error": True}
 
     glyphs, _tty_chars, _blstats, pos = obs_data
-    mode = args.get("mode", "").lower()
     cautious = args.get("cautious", False)
 
     visited = _get_visited()
 
     from ..compute.navigation import (
-        detect_corridor,
         detect_room,
-        plan_corridor_exploration,
         plan_room_exploration,
     )
 
-    if mode == "room":
-        room_tiles = detect_room(glyphs, pos)
-        if room_tiles is None:
-            return {"content": [{"type": "text", "text": "auto_explore room: NOT IN ROOM (try mode='corridor')"}]}
+    room_tiles = detect_room(glyphs, pos)
+    if room_tiles is None:
+        return {"content": [{"type": "text", "text": "auto_explore: NOT IN ROOM - use game_action('far <direction>') for corridors"}]}
 
-        actions = plan_room_exploration(glyphs, room_tiles, pos, visited)
-        if not actions:
-            return {"content": [{"type": "text", "text": "auto_explore room: FULLY EXPLORED - memorize this room as explored"}]}
+    actions = plan_room_exploration(glyphs, room_tiles, pos, visited)
+    if not actions:
+        return {"content": [{"type": "text", "text": "auto_explore: FULLY EXPLORED - memorize this room as explored"}]}
 
-        actions = actions[:100]
-        _pending_actions = actions
-        mode_suffix = " (cautious)" if cautious else ""
-        return {"content": [{"type": "text", "text": f"auto_explore room{mode_suffix}: EXECUTING {len(actions)} actions"}]}
-
-    elif mode == "corridor":
-        corridor = detect_corridor(glyphs, pos)
-        if corridor is None:
-            return {"content": [{"type": "text", "text": "auto_explore corridor: NOT IN CORRIDOR (try mode='room')"}]}
-
-        actions = plan_corridor_exploration(glyphs, corridor, pos, visited)
-        if not actions:
-            return {"content": [{"type": "text", "text": "auto_explore corridor: FULLY EXPLORED - memorize this corridor as explored"}]}
-
-        actions = actions[:100]
-        _pending_actions = actions
-        mode_suffix = " (cautious)" if cautious else ""
-        return {"content": [{"type": "text", "text": f"auto_explore corridor{mode_suffix}: EXECUTING {len(actions)} actions"}]}
-
-    else:
-        return {
-            "content": [{"type": "text", "text": f"ERROR: Unknown mode '{mode}'. Use: room, corridor"}],
-            "is_error": True,
-        }
+    actions = actions[:100]
+    _pending_actions = actions
+    mode_suffix = " (cautious)" if cautious else ""
+    return {"content": [{"type": "text", "text": f"auto_explore{mode_suffix}: EXECUTING {len(actions)} actions"}]}

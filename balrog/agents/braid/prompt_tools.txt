@@ -101,10 +101,12 @@ TRAVEL TOOLS:
 
 EXPLORATION TOOLS:
 
-- auto_explore(mode, cautious) - Queue exploration of current room
-  - mode: "room" - Explore current room (walks to all reachable tiles)
+- auto_explore(cautious) - Queue exploration of current room (walks to all floor tiles)
   - cautious: true to abort on any new tile discovery (slower), false for more complete discovery
+  - Searches once at each wall-adjacent tile (for secret doors)
+  - Avoids water/lava, swaps past pets/monsters safely
   Aborts on combat, HP drop, traps, or hunger. NOT great when low on food.
+  For corridors, use game_action("far <direction>") instead.
 
 ---
 
@@ -120,6 +122,11 @@ GAME ACTION TOOL:
     game_action("search", "search", "search")         # search 3 times
     game_action("north", "search", "north", "search") # searching while moving
 
+  Far commands (NetHack-native, efficient for corridors):
+    game_action("far north")     # move north until blocked/event
+    game_action("far southeast") # move diagonally until blocked
+    Stops on: wall, monster, item, door, branching corridor, trap
+
 ---
 
 DECISION TREE - FOLLOW EVERY TURN:
@@ -131,15 +138,15 @@ DECISION TREE - FOLLOW EVERY TURN:
 
 2. CHECK LOCATION
    In room (. floor tiles)?
-   ├── Room unexplored → auto_explore(mode="room")
+   ├── Room unexplored → auto_explore()
    ├── Room explored → navigate to nearest unexplored exit
    └── All done → scan(target="unexplored"), go there
 
    In corridor (# tiles)?
-   ├── Corridor unexplored → auto_explore(mode="corridor")
-   ├── Returns "FULLY EXPLORED" → memory_add it as explored
-   ├── At junction → pick unexplored branch
-   └── Dead end → game_action("search", "search", "search"), backtrack, memorize
+   ├── Corridor continues → game_action("far north") (stops at junction/door/end)
+   ├── At junction → pick unexplored branch, game_action("far <direction>")
+   ├── Dead end → game_action("search", "search", "search"), backtrack
+   └── Memorize explored corridors and junctions
 
    Next to closed door (+)?
    ├── Closed → game_action("open north") etc
@@ -161,8 +168,7 @@ DECISION TREE - FOLLOW EVERY TURN:
 
 FAILURE RECOVERY:
   "no path" → door blocking? open it. Manual moves around or through obstacle. Your pet or a monster could be in the way.
-  "NOT IN ROOM" → try auto_explore(mode="corridor")
-  "NOT IN CORRIDOR" → try auto_explore(mode="room")
+  "NOT IN ROOM" → use game_action("far <direction>") to explore corridor
   Stuck 3+ turns → try different direction
 
 ---

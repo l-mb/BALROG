@@ -2,7 +2,6 @@
 
 from .navigation import (
     build_walkable_mask,
-    detect_corridor,
     detect_room,
     distance,
     find_exits,
@@ -11,7 +10,6 @@ from .navigation import (
     get_position,
     nearest,
     pathfind,
-    plan_corridor_exploration,
     plan_room_exploration,
     scan_items,
     scan_monsters,
@@ -31,7 +29,5 @@ __all__ = [
     "find_unexplored",
     "find_exits",
     "detect_room",
-    "detect_corridor",
     "plan_room_exploration",
-    "plan_corridor_exploration",
 ]
