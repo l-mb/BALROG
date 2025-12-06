@@ -270,18 +270,20 @@ class BraidStorage:
         return [self._row_to_entry(row) for row in rows]
 
     def max_episode(self) -> int:
-        """Get highest episode number across all tables for this worker."""
-        # Check all tables that track episode numbers
+        """Get highest episode number across all tables globally.
+
+        Episode numbers must be unique across all workers to ensure
+        visited positions don't collide between different runs.
+        """
         max_vals = []
         for query in [
             "SELECT MAX(source_episode) FROM memory WHERE source_episode IS NOT NULL",
-            "SELECT MAX(episode) FROM journal WHERE worker_id = ?",
-            "SELECT MAX(episode) FROM visited WHERE worker_id = ?",
+            "SELECT MAX(episode) FROM journal",  # Global, not per-worker
+            "SELECT MAX(episode) FROM visited",  # Global, not per-worker
+            "SELECT MAX(episode) FROM tool_calls",
+            "SELECT MAX(episode) FROM todos",
         ]:
-            if "worker_id" in query:
-                row = self.conn.execute(query, (self.worker_id,)).fetchone()
-            else:
-                row = self.conn.execute(query).fetchone()
+            row = self.conn.execute(query).fetchone()
             if row[0] is not None:
                 max_vals.append(row[0])
         return max(max_vals) if max_vals else 0
