@@ -495,26 +495,55 @@ class MonitorDB:
         return [dict(r) for r in rows]
 
     def get_visited_positions(
-        self, worker_id: str, episode: int, dlvl: int
+        self, worker_id: str, episode: int, dungeon_num: int, dlvl: int, max_step: int | None = None
     ) -> set[tuple[int, int]]:
-        """Get all visited (x, y) positions for a specific level."""
-        rows = self.conn.execute(
-            """SELECT x, y FROM visited
-               WHERE worker_id = ? AND episode = ? AND dlvl = ?""",
-            (worker_id, episode, dlvl),
-        ).fetchall()
+        """Get visited (x, y) positions for a specific level/branch, optionally up to a step.
+
+        Args:
+            worker_id: Agent worker ID
+            episode: Episode number
+            dungeon_num: Dungeon branch (0=Dungeons of Doom, 1=Mines, etc.)
+            dlvl: Dungeon level (depth)
+            max_step: If provided, only include tiles visited by this step
+        """
+        if max_step is not None:
+            rows = self.conn.execute(
+                """SELECT x, y FROM visited
+                   WHERE worker_id = ? AND episode = ? AND dungeon_num = ? AND dlvl = ? AND first_step <= ?""",
+                (worker_id, episode, dungeon_num, dlvl, max_step),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                """SELECT x, y FROM visited
+                   WHERE worker_id = ? AND episode = ? AND dungeon_num = ? AND dlvl = ?""",
+                (worker_id, episode, dungeon_num, dlvl),
+            ).fetchall()
         return {(r["x"], r["y"]) for r in rows}
 
-    def get_current_dlvl(self, worker_id: str, episode: int) -> int | None:
-        """Get the current dungeon level from the latest screen log."""
-        row = self.conn.execute(
-            """SELECT json_extract(data, '$.dlvl') as dlvl FROM journal
-               WHERE worker_id = ? AND episode = ? AND event = 'screen'
-                     AND json_extract(data, '$.dlvl') IS NOT NULL
-               ORDER BY id DESC LIMIT 1""",
-            (worker_id, episode),
-        ).fetchone()
-        return int(row["dlvl"]) if row and row["dlvl"] is not None else None
+    def get_current_level_info(
+        self, worker_id: str, episode: int, max_step: int | None = None
+    ) -> tuple[int, int] | None:
+        """Get the current (dungeon_num, dlvl) from the latest visited entry.
+
+        Returns None if no visited entries exist for this episode.
+        """
+        if max_step is not None:
+            row = self.conn.execute(
+                """SELECT dungeon_num, dlvl FROM visited
+                   WHERE worker_id = ? AND episode = ? AND first_step <= ?
+                   ORDER BY first_step DESC LIMIT 1""",
+                (worker_id, episode, max_step),
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                """SELECT dungeon_num, dlvl FROM visited
+                   WHERE worker_id = ? AND episode = ?
+                   ORDER BY first_step DESC LIMIT 1""",
+                (worker_id, episode),
+            ).fetchone()
+        if row:
+            return (int(row["dungeon_num"]), int(row["dlvl"]))
+        return None
 
     def get_recent_tool_calls(
         self, worker_id: str, episode: int, limit: int = 30

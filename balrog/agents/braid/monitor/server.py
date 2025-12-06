@@ -75,11 +75,12 @@ def create_app(db_path: Path) -> Starlette:
             worker_id, max_step=current_step, episode=current_episode
         )
 
-        # Get visited positions for exploration overlay (all visits, not filtered by step)
+        # Get visited positions for exploration overlay (filtered by current step when viewing history)
         visited: set[tuple[int, int]] = set()
-        dlvl = db.get_current_dlvl(worker_id, current_episode) if current_episode else None
-        if dlvl is not None and current_episode is not None:
-            visited = db.get_visited_positions(worker_id, current_episode, dlvl)
+        level_info = db.get_current_level_info(worker_id, current_episode, max_step=current_step) if current_episode else None
+        if level_info is not None and current_episode is not None:
+            dungeon_num, dlvl = level_info
+            visited = db.get_visited_positions(worker_id, current_episode, dungeon_num, dlvl, max_step=current_step)
 
         # Pre-process screen with visited flags for template
         # Map row y (0-20) appears at screen row y+1 (rows 1-21)

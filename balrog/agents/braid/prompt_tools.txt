@@ -74,7 +74,7 @@ SCANNING TOOLS:
 - scan(target) - View map entities. Target: monsters, items, traps, exits, unexplored
   Returns positions and distances sorted by proximity
 
-- show_visited_map() - Show ASCII map with visited tiles marked as █
+- show_visited_map() - Show ASCII map of current level and branch with already directly visited tiles marked as █
   Unvisited tiles keep original glyph, indicating coordinates to explore from!
   Use when:
   - Level seems explored but no stairs found
