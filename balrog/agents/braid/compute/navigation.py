@@ -612,29 +612,30 @@ def plan_visited_aware_exploration(
             if nethack.glyph_is_monster(glyph) or nethack.glyph_is_pet(glyph):
                 extra_walkable.add((x, y))
 
+    # Use ordered perimeter walk for systematic coverage instead of greedy nearest
+    ordered_targets = _order_perimeter(list(targets), pos)
+
     actions: list[str] = []
     current = pos
-    remaining = set(targets)
 
-    while remaining:
-        # Find nearest unvisited target
-        nearest = min(remaining, key=lambda t: distance(current[0], current[1], t[0], t[1]))
-
-        path = pathfind(glyphs, current, nearest, extra_walkable)
+    for target in ordered_targets:
+        path = pathfind(glyphs, current, target, extra_walkable)
 
         if path is None:
-            # No path found - skip this target
-            remaining.discard(nearest)
+            # No path found - try from current position with all walkable as extra
+            # This handles cases where the path requires going through visited tiles
+            path = pathfind(glyphs, current, target, extra_walkable | walkable_tiles)
+
+        if path is None:
+            # Still no path - skip this target but continue with others
             continue
 
         actions.extend(path)
+        current = target  # Only update position after successful path
 
         # Search if at perimeter
-        if nearest in perimeter:
+        if target in perimeter:
             actions.append("search")
-
-        current = nearest
-        remaining.discard(nearest)
 
         # Limit actions per call to avoid very long queues
         if len(actions) > 200:
