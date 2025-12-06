@@ -462,8 +462,6 @@ def detect_room(
 
     # Flood fill from seed tiles, including tiles with items/monsters
     room_tiles: set[tuple[int, int]] = set()
-    # Include player position even though glyph differs (player/monster overlay)
-    room_tiles.add((px, py))
     queue = list(seed_tiles)
 
     while queue:
@@ -481,6 +479,9 @@ def detect_room(
         # Add cardinal neighbors
         for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
             queue.append((x + dx, y + dy))
+
+    # Include player position even if glyph differs (player/monster overlay)
+    room_tiles.add((px, py))
 
     # Check if it's actually a room (not corridor)
     # Relaxed thresholds for dark rooms where only nearby tiles visible

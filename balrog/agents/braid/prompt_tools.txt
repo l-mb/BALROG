@@ -116,7 +116,7 @@ EXPLORATION TOOLS:
   - cautious: true to abort on any new tile discovery, false only aborts on triggers
   Aborts on combat, HP drop, traps, or hunger.
   For corridors, use game_action("far <direction>") instead.
-  "far ..." will skip past junctions, you will have to explore these later!
+  "far ..." will ignore junctions, you will have to explore these later!
 
 ---
 
@@ -208,7 +208,7 @@ NETHACK ESSENTIALS:
 - Gold, scrolls, potions, wands have AUTO-PICKUP enabled
 - Stairs up from Dlvl:1 = INSTANT LOSS
 - Diagonal movement saves steps
-- Sometimes, areas may ONLY be connected via diagonal movement!
+- Sometimes, areas can ONLY be connected via diagonal movement (diagonal adjacent walkable corridor tiles)
 - "far <direction>" actions greatly improve movement speed, but skip past branches
 - Hidden doors or corridors can be stubborn, requiring many searches
 - Must be DIRECTLY ADJACENT and PROPERLY ALIGNED for open, kick, fight actions
@@ -225,6 +225,13 @@ DETAILED plan for per-level exploration:
   Revise with new discoveries!
   Per-level objective: find stairs down, solve puzzle, ...
 Next long-term objective (descend, ...)
+
+PLAN WHEN YOU CANNOT FIND STAIRS:
+- Escalate to meticulously detailed level of planning
+- Use show_visited_map() tool to identify tiles, unexplored corridors you have not visited
+- Mark every apparent deadend corridor (# tiles that just end) as a TODO
+- Mark every wall as a separate TODO
+- Visit and Search all these spots
 
 ---
 
