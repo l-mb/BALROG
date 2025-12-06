@@ -222,9 +222,9 @@ Next long-term objective (descend, ...)
 
 PLAN WHEN YOU CANNOT FIND STAIRS:
 - Escalate to meticulously detailed level of planning
-- Use scan("unexplored") to find ALL frontiers, then travel_to each
-- Mark every apparent deadend corridor (# tiles that just end) as a TODO
+- Use scan("unexplored") to find ALL frontiers, then travel_to each for search
 - Plan to search and explore every existing room three times explicitly
+- "look" under items, corpses: these could be hiding stairs
 - Search dead ends multiple times (hidden passages are stubborn!)
 - Visit and Search all these spots systematically
 - As a final resort, restart search for the entire level
