@@ -84,6 +84,7 @@ class BRAIDAgent(BaseAgent):
         # Multi-action queue state
         self._action_queue: list[str] = []
         self._queue_start_hp: int | None = None
+        self._queue_start_hunger: int | None = None  # Hunger state when queue started (0=Satiated, 2=Hungry, etc.)
         self._cautious_mode: bool = False
         self._last_glyphs: Any = None  # For cautious mode discovery detection
         self._batch_source: str | None = None  # Command that created batch
@@ -327,9 +328,10 @@ class BRAIDAgent(BaseAgent):
 
         parsed = self._parse_response(response)
 
-        # If queue was populated, track HP for abort detection
+        # If queue was populated, track HP and hunger for abort detection
         if self._action_queue:
             self._queue_start_hp = self._extract_hp(obs)
+            self._queue_start_hunger = self._extract_hunger(obs)
 
         return parsed
 
@@ -562,10 +564,15 @@ class BRAIDAgent(BaseAgent):
         if self._is_interactive_prompt(text):
             return "Interactive prompt detected"
 
-        # Abort on hunger warnings (Hungry, Weak, Fainting)
-        hunger_patterns = ["hungry", "weak", "fainting", "faint from lack of food"]
-        if any(p in text_lower for p in hunger_patterns):
-            return "Hunger warning"
+        # Abort on WORSENING hunger (not pre-existing)
+        # Only abort if hunger state increased since queue started
+        current_hunger = self._extract_hunger(obs)
+        if current_hunger is not None and self._queue_start_hunger is not None:
+            if current_hunger > self._queue_start_hunger and current_hunger >= 2:
+                # Hunger worsened to Hungry (2) or worse
+                hunger_names = ["Satiated", "OK", "Hungry", "Weak", "Fainting", "Fainted", "Starved"]
+                hunger_name = hunger_names[current_hunger] if current_hunger < len(hunger_names) else f"?{current_hunger}"
+                return f"Hunger worsened to {hunger_name}"
 
         # Pet interactions are normal, don't abort
         pet_patterns = ["swap places", "your kitten", "your cat", "your dog", "your pony",
@@ -720,6 +727,23 @@ class BRAIDAgent(BaseAgent):
             return int(hp_match.group(1))
         return None
 
+    def _extract_hunger(self, obs: dict[str, Any]) -> int | None:
+        """Extract hunger state from observation.
+
+        Returns hunger index: 0=Satiated, 1=OK, 2=Hungry, 3=Weak, 4=Fainting, etc.
+        Higher values = more hungry/dangerous.
+        """
+        raw_obs = obs.get("obs")
+        if isinstance(raw_obs, dict):
+            blstats = raw_obs.get("blstats")
+            if blstats is not None:
+                try:
+                    # blstats[21] is hunger state in NLE
+                    return int(blstats[21])
+                except (IndexError, TypeError, ValueError):
+                    pass
+        return None
+
     def _extract_position_info(
         self, obs: dict[str, Any]
     ) -> tuple[int, int, int, int] | None:
@@ -751,6 +775,7 @@ class BRAIDAgent(BaseAgent):
         """Clear all batch/queue tracking state."""
         self._action_queue.clear()
         self._queue_start_hp = None
+        self._queue_start_hunger = None
         self._cautious_mode = False
         self._last_glyphs = None
         self._batch_source = None
@@ -844,6 +869,7 @@ class BRAIDAgent(BaseAgent):
         self._episode_llm_calls = 0
         self._action_queue.clear()
         self._queue_start_hp = None
+        self._queue_start_hunger = None
         self._cautious_mode = False
         self._last_glyphs = None
         self._batch_source = None

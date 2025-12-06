@@ -48,7 +48,7 @@ Recording rules (persistent across games):
   memory_add("floating eye: don't melee, use ranged", "persistent", "rule,monster", 8)
   memory_add("always explore full level before descending", "persistent", "rule,strategy", 9)
   memory_add("prayer cooldown ~800 turns", "persistent", "rule,mechanic", 7)
-  USE persistent scope for working strategies, game/scoring mechanics learned, commands better understood, dangers discovered.
+  USE persistent scope for: working strategies, game/scoring mechanics learned, movement constraints, commands better understood, dangers discovered.
   Do NOT persist exact coordinates, those are random across games
 
 Searching memory:
@@ -56,14 +56,14 @@ Searching memory:
   memory_search("", "lvl:1", "", 10)              → find all level 1 memories
   memory_search("", "rule", "persistent", 20)     → get all persistent rules/learnings
   memory_search("", "", "persistent", 50)         → get ALL persistent memories
-  memory_search("explored", "room", "episode", 10) → find explored rooms this episode
+  memory_search("room", "temple:y", "episode", 10) → find temples found during this episode
 
 EXAMPLE MEMORY TAGS (use lvl:N suffix for level-specific):
   blocked,lvl:N     - "@x,y:dir" blocked moves (CHECK BEFORE MOVING!)
   room,lvl:N        - "@identifier explored:y/n dark:y/n shop:y/n temple:y/n"
   stairs,lvl:N      - ">x,y" (down) or "<x,y" (up) stair locations
   rule              - game rules learned
-  You can add/create arbitrary memory tags as needed!
+  You can add/create arbitrary memory tags as needed.
 
 ---
 
@@ -198,6 +198,7 @@ Diagonal: NE=y--,x++  SE=y++,x++  NW=y--,x--  SW=y++,x--
 
 NETHACK ESSENTIALS:
 - Eat before Weak. Many corpses safe. Deadly: cockatrice.
+- AVOID being Burdened. Harmful!
 - Do NOT eat when satiated
 - Prayer: 800+ turn cooldown, emergencies only
 - Elbereth: engrave for protection
