@@ -85,6 +85,9 @@ class BRAIDAgent(BaseAgent):
         # Queue abort notification (shown to LLM on next prompt)
         self._queue_abort_msg: str | None = None
 
+        # Messages accumulated during queue execution
+        self._queue_messages: list[str] = []
+
         # Memory refresh interval (include memory in system prompt every N LLM calls)
         self._memory_refresh_interval: int = 100
 
@@ -95,6 +98,15 @@ class BRAIDAgent(BaseAgent):
     def build_system_prompt(self, env_instruction: str) -> str:
         """Append BRAID response format instructions to environment prompt."""
         return f"{env_instruction}\n\n{self._SYSTEM_PROMPT_SUFFIX}"
+
+    def _extract_message(self, obs: dict[str, Any]) -> str:
+        """Extract game message from observation."""
+        raw_obs = obs.get("obs")
+        if isinstance(raw_obs, dict):
+            msg = raw_obs.get("text_message", "")
+            if msg:
+                return str(msg).strip()
+        return ""
 
     def _extract_screen(self, obs: dict[str, Any]) -> str | None:
         """Extract ASCII screen from observation (NetHack tty_chars)."""
@@ -132,6 +144,11 @@ class BRAIDAgent(BaseAgent):
 
         # Check action queue first - return queued action if available and safe
         if self._action_queue:
+            # Capture message from previous action (this observation is result of last queued action)
+            queue_msg = self._extract_message(obs)
+            if queue_msg:
+                self._queue_messages.append(queue_msg)
+
             abort_reason = self._should_abort_queue(obs)
             if abort_reason:
                 remaining = len(self._action_queue)
@@ -139,8 +156,10 @@ class BRAIDAgent(BaseAgent):
                     self.episode_number, self._step,
                     f"Queue aborted ({remaining} actions remaining): {abort_reason}"
                 )
-                # Store abort message for next LLM prompt
-                self._queue_abort_msg = f"[QUEUE ABORTED: {abort_reason}. {remaining} queued actions cancelled. You must decide what to do next.]"
+                # Store abort message for next LLM prompt (includes accumulated messages)
+                self._queue_abort_msg = self._format_queue_summary(
+                    aborted=True, reason=abort_reason, remaining=remaining
+                )
                 self._clear_batch_state()
             else:
                 # Check for newly discovered traps and re-plan if needed
@@ -209,8 +228,20 @@ class BRAIDAgent(BaseAgent):
                 )
                 return action_response
             else:
-                # Exploration complete
+                # Exploration complete - capture summary before clearing
+                if self._queue_messages:
+                    self._queue_abort_msg = self._format_queue_summary(aborted=False)
                 self._clear_batch_state()
+
+        # If queue just finished (batch was in progress but queue is now empty), capture summary
+        if self._batch_total > 0 and not self._action_queue and not self._queue_abort_msg:
+            # Capture final message from this observation
+            final_msg = self._extract_message(obs)
+            if final_msg:
+                self._queue_messages.append(final_msg)
+            if self._queue_messages:
+                self._queue_abort_msg = self._format_queue_summary(aborted=False)
+            self._clear_batch_state()
 
         self.prompt_builder.update_observation(obs)
         messages = self.prompt_builder.get_prompt()
@@ -402,6 +433,8 @@ class BRAIDAgent(BaseAgent):
             self._queue_abort_msg = None  # Clear after use
 
         sections.append(current_content)
+
+        sections.append("Think carefully about the current information, todos and goals, the result of your last actions, available tools and actions, before issuing your next action(s).")
 
         return "\n\n".join(sections)
 
@@ -749,6 +782,37 @@ class BRAIDAgent(BaseAgent):
                     pass
         return None
 
+    def _format_queue_summary(
+        self, aborted: bool = False, reason: str | None = None, remaining: int = 0
+    ) -> str:
+        """Format summary of queue execution including accumulated messages."""
+        executed = self._batch_executed
+        total = self._batch_total
+        messages = self._queue_messages
+
+        if aborted:
+            header = f"[QUEUE ABORTED: {reason}. {remaining} actions cancelled after {executed}/{total} executed.]"
+        else:
+            header = f"[Queue completed: {executed} actions executed]"
+
+        if not messages:
+            return header
+
+        # Deduplicate consecutive identical messages
+        unique_msgs: list[str] = []
+        for msg in messages:
+            if not unique_msgs or msg != unique_msgs[-1]:
+                unique_msgs.append(msg)
+
+        # Limit to last 10 messages to avoid overwhelming context
+        if len(unique_msgs) > 10:
+            unique_msgs = unique_msgs[-10:]
+            msg_list = "...\n" + "\n".join(f"- {m}" for m in unique_msgs)
+        else:
+            msg_list = "\n".join(f"- {m}" for m in unique_msgs)
+
+        return f"{header}\nMessages from NetHack observed during queue execution:\n{msg_list}"
+
     def _clear_batch_state(self) -> None:
         """Clear all batch/queue tracking state."""
         self._action_queue.clear()
@@ -759,6 +823,7 @@ class BRAIDAgent(BaseAgent):
         self._batch_source = None
         self._batch_total = 0
         self._batch_executed = 0
+        self._queue_messages.clear()
 
     def _pop_queued_action(self) -> LLMResponse:
         """Return next queued action without LLM call."""
