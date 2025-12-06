@@ -906,10 +906,7 @@ class ClaudeToolWrapper(LLMClientWrapper):
         self._tool_calls = []  # Reset for this call
 
         async def _send_and_receive(content: str, is_first: bool):
-            """Send query and receive response, tools execute automatically.
-
-            For first message, use connect(prompt) to avoid extra round trip.
-            """
+            """Send query and receive response, tools execute automatically."""
             from claude_agent_sdk.types import AssistantMessage, ResultMessage
 
             response_text = ""
@@ -918,8 +915,9 @@ class ClaudeToolWrapper(LLMClientWrapper):
             seen_tool_ids: set[str] = set()
 
             if is_first:
-                # First message: connect with prompt (single round trip)
-                await self._client.connect(content)
+                # First message: connect without prompt, then query
+                await self._client.connect()
+                await self._client.query(content)
             else:
                 # Subsequent messages: query on existing connection
                 await self._client.query(content)
