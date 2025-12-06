@@ -261,13 +261,34 @@ class BraidStorage:
         self.conn.commit()
         return cursor.rowcount > 0
 
-    def search(self, query: str, limit: int = 10) -> list[MemoryEntry]:
-        query_lower = query.lower()
-        rows = self.conn.execute(
-            "SELECT * FROM memory WHERE deleted = 0 AND LOWER(content) LIKE ? LIMIT ?",
-            (f"%{query_lower}%", limit),
-        ).fetchall()
-        return [self._row_to_entry(row) for row in rows]
+    def search(
+        self, query: str, tags: set[str] | None = None, limit: int = 10
+    ) -> list[MemoryEntry]:
+        """Search memory by content substring and optional tags filter."""
+        query_lower = query.lower() if query else ""
+        conditions = ["deleted = 0"]
+        params: list[str | int] = []
+
+        if query_lower:
+            conditions.append("LOWER(content) LIKE ?")
+            params.append(f"%{query_lower}%")
+
+        sql = f"SELECT * FROM memory WHERE {' AND '.join(conditions)} LIMIT ?"
+        params.append(limit)
+
+        rows = self.conn.execute(sql, params).fetchall()
+        entries = [self._row_to_entry(row) for row in rows]
+
+        # Filter by tags in Python (SQLite LIKE on comma-separated is unreliable)
+        if tags:
+            filtered = []
+            for e in entries:
+                entry_tags = {t.strip() for t in e.tags.split(",") if t.strip()}
+                if tags & entry_tags:  # Any tag matches
+                    filtered.append(e)
+            return filtered
+
+        return entries
 
     def max_episode(self) -> int:
         """Get highest episode number across all tables globally.

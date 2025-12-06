@@ -1,4 +1,3 @@
-import json
 import logging
 import re
 import time
@@ -19,8 +18,7 @@ class BRAIDAgent(BaseAgent):
     An agent that learns from experience through unified memory:
     - Episode memory: per-episode insights (scope=episode)
     - Persistent memory: cross-episode knowledge (scope=persistent)
-    - Tag filtering: LLM can enable/disable tags to control what's shown
-    - Adaptive thinking: LLM self-selects depth of reasoning per step
+    - Claude SDK tools: memory, navigation, and action tools for LLM interaction
     """
 
     # Commands that accept a direction as follow-up input
@@ -57,7 +55,6 @@ class BRAIDAgent(BaseAgent):
         self.storage = BraidStorage(Path(braid_cfg.db_path))
         self.max_memory_context = braid_cfg.get("max_persistent_context", 100)
         self.episode_number = self.storage.max_episode()
-        self._enabled_tags: set[str] | None = None
 
         # Create MCP server with BRAID tools and attach to client
         from .tools import create_braid_mcp_server
@@ -73,7 +70,6 @@ class BRAIDAgent(BaseAgent):
 
         # Journal config
         self._log_full_prompt = braid_cfg.get("log_full_prompt", False)
-        self._log_memory_details = braid_cfg.get("log_memory_details", False)
 
         # Step and token tracking (storage is stateless)
         self._step = 0
@@ -84,17 +80,6 @@ class BRAIDAgent(BaseAgent):
         self._episode_output_tokens = 0
         self._cumulative_llm_calls = 0
         self._episode_llm_calls = 0
-
-        # Track memory update counts and details
-        self._mem_adds = 0
-        self._mem_removes = 0
-        self._mem_episode_adds = 0
-        self._mem_persistent_adds = 0
-        self._mem_episode_removes = 0
-        self._mem_persistent_removes = 0
-        self._tag_changes = False
-        self._added_entries: list[dict[str, Any]] = []
-        self._removed_ids: list[str] = []
 
         # Multi-action queue state
         self._action_queue: list[str] = []
@@ -114,14 +99,6 @@ class BRAIDAgent(BaseAgent):
 
         # Memory refresh interval (include memory in system prompt every N LLM calls)
         self._memory_refresh_interval: int = 100
-
-        # Current observation for tools (set before each generate)
-        self._current_obs: dict[str, Any] | None = None
-
-        # Legacy compute helpers state (TODO: remove after tool migration complete)
-        self._enable_compute = braid_cfg.get("enable_compute_helpers", True)
-        self._pending_compute: list[str] = []
-        self._compute_result: str | None = None
 
     def build_system_prompt(self, env_instruction: str) -> str:
         """Append BRAID response format instructions to environment prompt."""
@@ -160,9 +137,6 @@ class BRAIDAgent(BaseAgent):
 
         # Extract position info for tracking (available for both queued and LLM actions)
         pos_info = self._extract_position_info(obs)
-
-        # Process any pending compute requests from last turn
-        self._process_pending_compute(obs)
 
         # Check action queue first - return queued action if available and safe
         if self._action_queue:
@@ -295,7 +269,7 @@ class BRAIDAgent(BaseAgent):
         # Set tool context before generate (tools need current obs, storage, episode, step)
         from .tools import get_pending_actions, set_tool_context
 
-        set_tool_context(obs, self.storage, self.episode_number, self._step, self._enabled_tags)
+        set_tool_context(obs, self.storage, self.episode_number, self._step)
 
         response = self.client.generate(messages)
 
@@ -355,10 +329,10 @@ class BRAIDAgent(BaseAgent):
         sections = []
 
         p_entries = self.storage.retrieve(
-            tags=self._enabled_tags, scope=MemoryScope.PERSISTENT, limit=self.max_memory_context
+            scope=MemoryScope.PERSISTENT, limit=self.max_memory_context
         )
         e_entries = self.storage.retrieve(
-            tags=self._enabled_tags, scope=MemoryScope.EPISODE,
+            scope=MemoryScope.EPISODE,
             episode=self.episode_number, limit=self.max_memory_context
         )
 
@@ -366,7 +340,7 @@ class BRAIDAgent(BaseAgent):
             lines = [f"[{e.entry_id}] T:{e.source_step or '?'} (prio:{e.priority}) (tags: {e.tags}) {e.content}" for e in p_entries]
             header = f"PERSISTENT memory ({len(p_entries)}"
             if len(p_entries) >= self.max_memory_context:
-                total = self.storage.count(tags=self._enabled_tags, scope=MemoryScope.PERSISTENT)
+                total = self.storage.count(scope=MemoryScope.PERSISTENT)
                 hidden = total - len(p_entries)
                 if hidden > 0:
                     header += f"+{hidden} hidden due to limit"
@@ -378,7 +352,7 @@ class BRAIDAgent(BaseAgent):
             header = f"EPISODE memory ({len(e_entries)}"
             if len(e_entries) >= self.max_memory_context:
                 total = self.storage.count(
-                    tags=self._enabled_tags, scope=MemoryScope.EPISODE, episode=self.episode_number
+                    scope=MemoryScope.EPISODE, episode=self.episode_number
                 )
                 hidden = total - len(e_entries)
                 if hidden > 0:
@@ -409,11 +383,6 @@ class BRAIDAgent(BaseAgent):
             sections.append(self._queue_abort_msg)
             self._queue_abort_msg = None  # Clear after use
 
-        # Inject compute results if available
-        if self._compute_result:
-            sections.append(self._compute_result)
-            self._compute_result = None
-
         sections.append(current_content)
 
         return "\n\n".join(sections)
@@ -431,17 +400,11 @@ class BRAIDAgent(BaseAgent):
         if not tag_counts:
             return ""
         tags_str = " ".join(f"{t}:{c}" for t, c in sorted(tag_counts.items()))
-
-        if self._enabled_tags is None:
-            filter_state = "enabled tags: all"
-        elif not self._enabled_tags:
-            filter_state = "enabled tags: none (all hidden)"
-        else:
-            filter_state = f"enabled tags: {','.join(sorted(self._enabled_tags))}"
-        return f"[{filter_state}] [tags counters: {tags_str}]"
+        return f"[tag counts: {tags_str}]"
 
 
     def _parse_response(self, response: LLMResponse) -> LLMResponse:
+        """Process LLM response. Actions come from tools, not XML parsing."""
         completion = response.completion
         elapsed = time.perf_counter() - self._request_start if self._request_start else 0
         self._request_start = None
@@ -452,47 +415,18 @@ class BRAIDAgent(BaseAgent):
         self._episode_input_tokens += response.input_tokens
         self._episode_output_tokens += response.output_tokens
 
-        think_match = re.search(r"<think>(.*?)</think>", completion, re.DOTALL)
-        reasoning = think_match.group(1).strip() if think_match else None
-
-        # Reset memory update counters
-        self._mem_adds = 0
-        self._mem_removes = 0
-        self._mem_episode_adds = 0
-        self._mem_persistent_adds = 0
-        self._mem_episode_removes = 0
-        self._mem_persistent_removes = 0
-        self._tag_changes = False
-        self._added_entries = []
-        self._removed_ids = []
-
-        mem_match = re.search(r"<memory_updates>(.*?)</memory_updates>", completion, re.DOTALL)
-        if mem_match:
-            self._process_memory_updates(mem_match.group(1))
-
-        # Parse compute requests
-        if self._enable_compute:
-            compute_match = re.search(r"<\|COMPUTE\|>(.*?)<\|END\|>", completion, re.DOTALL)
-            if compute_match:
-                self._pending_compute = [
-                    line.strip()
-                    for line in compute_match.group(1).strip().split("\n")
-                    if line.strip()
-                ]
-
-        # Parse actions (single or multi)
-        actions = self._parse_multi_actions(completion)
-        action = actions[0]
-
-        # Queue remaining actions if multi-action response
-        if len(actions) > 1:
-            self._action_queue = actions[1:]
-            self._batch_source = "multi-action"
-            self._batch_total = len(actions)
-            self._batch_executed = 1  # First action executed this turn
-
-        if reasoning:
-            self.prompt_builder.update_reasoning(reasoning)
+        # With SDK tools, actions are queued by game_action/auto_explore tools
+        # The action queue is populated before this method is called
+        # Use first queued action or "wait" if no action was specified
+        has_queue = bool(self._action_queue)
+        if self._action_queue:
+            action = self._action_queue.pop(0)
+            if self._action_queue:
+                self._batch_source = "tool_action"
+                self._batch_total = len(self._action_queue) + 1
+                self._batch_executed = 1
+        else:
+            action = "wait"  # No action tool was called
 
         # Log response
         self.storage.log_response(
@@ -506,64 +440,18 @@ class BRAIDAgent(BaseAgent):
             ep_output_tokens=self._episode_output_tokens,
             total_input_tokens=self._cumulative_input_tokens,
             total_output_tokens=self._cumulative_output_tokens,
-            reasoning=reasoning,
+            reasoning=completion,
             cache_creation_tokens=getattr(response, "cache_creation_tokens", 0) or 0,
             cache_read_tokens=getattr(response, "cache_read_tokens", 0) or 0,
             extended_thinking=getattr(response, "extended_thinking", None),
-            action_type="multi" if len(actions) > 1 else "single",
-            compute_requests=self._pending_compute if self._pending_compute else None,
+            action_type="multi" if has_queue else "single",
+            compute_requests=None,
             raw_completion=completion,
             ep_llm_calls=self._episode_llm_calls,
             total_llm_calls=self._cumulative_llm_calls,
         )
 
-        # Log memory updates
-        self.storage.log_memory_update(
-            episode=self.episode_number,
-            step=self._step,
-            adds=self._mem_adds,
-            removes=self._mem_removes,
-            tag_changes=self._tag_changes,
-            added_entries=self._added_entries if self._log_memory_details else None,
-            removed_ids=self._removed_ids if self._log_memory_details else None,
-            episode_adds=self._mem_episode_adds,
-            persistent_adds=self._mem_persistent_adds,
-            episode_removes=self._mem_episode_removes,
-            persistent_removes=self._mem_persistent_removes,
-        )
-
-        return response._replace(reasoning=reasoning or completion, completion=action)
-
-    # Words that are unlikely to be valid actions
-    _SKIP_WORDS = frozenset({
-        "yes", "no", "true", "false", "the", "a", "an", "is", "are", "was", "were",
-        "i", "you", "it", "this", "that", "should", "would", "could", "will", "can",
-        "thinking", "action", "memory", "response", "format", "required", "optional",
-    })
-
-    def _fallback_action(self, completion: str) -> str:
-        """Extract action when tags missing. Default to 'esc' if unparseable."""
-        lines = completion.strip().split("\n")
-        for line in reversed(lines):
-            line = line.strip().lower()
-            # Skip XML-like tags and known non-action prefixes
-            if not line or line.startswith(("<", "thinking", "memory", "add:", "remove:", "enable", "disable", "reset")):
-                continue
-            # Get last word, strip punctuation
-            words = line.split()
-            if words:
-                candidate = words[-1].rstrip(".,!?:;")
-                if candidate and candidate not in self._SKIP_WORDS:
-                    self.storage.log_error(
-                        self.episode_number, self._step,
-                        f"Fallback action '{candidate}' from: {line[:50]}"
-                    )
-                    return candidate
-        self.storage.log_error(
-            self.episode_number, self._step,
-            f"No action found, defaulting to 'esc'. Response: {completion[:100]}"
-        )
-        return "esc"
+        return response._replace(reasoning=completion, completion=action)
 
     # --- Multi-action queue support ---
 
@@ -834,227 +722,6 @@ class BRAIDAgent(BaseAgent):
                     pass
         return None
 
-    def _process_pending_compute(self, obs: dict[str, Any]) -> None:
-        """Execute pending compute requests using current observation."""
-        if not self._pending_compute:
-            return
-
-        from .compute.navigation import (
-            distance,
-            get_position,
-            nearest,
-            pathfind,
-        )
-
-        raw_obs = obs.get("obs", {})
-        glyphs = raw_obs.get("glyphs") if isinstance(raw_obs, dict) else None
-        blstats = raw_obs.get("blstats") if isinstance(raw_obs, dict) else None
-        tty_chars = raw_obs.get("tty_chars") if isinstance(raw_obs, dict) else None
-
-        if glyphs is None or blstats is None:
-            self._compute_result = "[COMPUTE] ERROR: No glyph data available"
-            self._pending_compute = []
-            return
-
-        pos = get_position(blstats)
-        results = []
-
-        for request in self._pending_compute:
-            if request.startswith("distance:"):
-                match = re.match(r"distance:\s*@(\d+),(\d+)\s*->\s*@(\d+),(\d+)", request)
-                if match:
-                    x1, y1, x2, y2 = map(int, match.groups())
-                    d = distance(x1, y1, x2, y2)
-                    results.append(f"distance: @{x1},{y1} -> @{x2},{y2} = {d} tiles")
-                else:
-                    results.append("distance: PARSE ERROR")
-
-            elif request.startswith("nearest:"):
-                feature = request.split(":", 1)[1].strip()
-                result = nearest(glyphs, pos, feature)
-                if result:
-                    x, y, d = result
-                    results.append(f"nearest: {feature} = @{x},{y} ({d} tiles)")
-                else:
-                    results.append(f"nearest: {feature} = NOT FOUND in explored areas")
-
-            elif request.startswith("pathfind:"):
-                from .compute.navigation import find_monster_positions
-                match = re.match(r"pathfind:\s*@(\d+),(\d+)\s*->\s*@(\d+),(\d+)", request)
-                if match:
-                    x1, y1, x2, y2 = map(int, match.groups())
-                    # Include monster/pet positions as walkable (can attack/swap)
-                    extra = {pos} | find_monster_positions(glyphs)
-                    path = pathfind(glyphs, (x1, y1), (x2, y2), extra_walkable=extra)
-                    if path:
-                        dirs = " ".join(path)
-                        results.append(
-                            f"pathfind: @{x1},{y1} -> @{x2},{y2} = {dirs} ({len(path)} moves)"
-                        )
-                    else:
-                        results.append(
-                            f"pathfind: @{x1},{y1} -> @{x2},{y2} = NO PATH (unexplored/blocked)"
-                        )
-                else:
-                    results.append("pathfind: PARSE ERROR")
-
-            elif request.startswith("travel_to:"):
-                # Absolute: travel_to: @45,12
-                # Relative: travel_to: +3,-2 (x+3, y-2 from current position)
-                from .compute.navigation import find_monster_positions
-                abs_match = re.match(r"travel_to:\s*@(\d+),(\d+)", request)
-                rel_match = re.match(r"travel_to:\s*([+-]?\d+),([+-]?\d+)", request)
-                if abs_match:
-                    gx, gy = map(int, abs_match.groups())
-                elif rel_match:
-                    dx, dy = map(int, rel_match.groups())
-                    gx, gy = pos[0] + dx, pos[1] + dy
-                else:
-                    results.append("travel_to: PARSE ERROR (use @x,y or +dx,dy)")
-                    continue
-
-                # Include monster/pet positions as walkable (can attack/swap)
-                extra = {pos} | find_monster_positions(glyphs)
-                path = pathfind(glyphs, pos, (gx, gy), extra_walkable=extra)
-                if path:
-                    self._action_queue.extend(path)
-                    self._queue_start_hp = self._extract_hp(obs)
-                    self._batch_source = f"travel_to(@{gx},{gy})"
-                    self._batch_total = len(path)
-                    self._batch_executed = 0
-                    results.append(f"travel_to: @{gx},{gy} = EXECUTING {len(path)} moves (auto)")
-                else:
-                    results.append(f"travel_to: @{gx},{gy} = NO PATH (unexplored/blocked)")
-
-            elif request.startswith("travel:"):
-                # Direction-based relative travel: travel: north 5, travel: NE 3
-                from .compute.navigation import DIRS, find_monster_positions
-                dir_match = re.match(
-                    r"travel:\s*(north|south|east|west|northeast|northwest|southeast|southwest|N|S|E|W|NE|NW|SE|SW)\s+(\d+)",
-                    request, re.IGNORECASE
-                )
-                if dir_match:
-                    dir_name, dist_str = dir_match.groups()
-                    dist = int(dist_str)
-                    # Normalize direction name
-                    dir_map = {
-                        "n": "north", "s": "south", "e": "east", "w": "west",
-                        "ne": "northeast", "nw": "northwest", "se": "southeast", "sw": "southwest"
-                    }
-                    dir_name = dir_map.get(dir_name.lower(), dir_name.lower())
-                    if dir_name in DIRS:
-                        dy, dx = DIRS[dir_name]
-                        gx, gy = pos[0] + dx * dist, pos[1] + dy * dist
-                        # Include monster/pet positions as walkable (can attack/swap)
-                        extra = {pos} | find_monster_positions(glyphs)
-                        path = pathfind(glyphs, pos, (gx, gy), extra_walkable=extra)
-                        if path:
-                            self._action_queue.extend(path)
-                            self._queue_start_hp = self._extract_hp(obs)
-                            self._batch_source = f"travel({dir_name},{dist})"
-                            self._batch_total = len(path)
-                            self._batch_executed = 0
-                            results.append(f"travel: {dir_name} {dist} -> @{gx},{gy} = EXECUTING {len(path)} moves (auto)")
-                        else:
-                            results.append(f"travel: {dir_name} {dist} -> @{gx},{gy} = NO PATH")
-                    else:
-                        results.append(f"travel: UNKNOWN DIRECTION '{dir_name}'")
-                else:
-                    results.append("travel: PARSE ERROR (use 'travel: north 5' or 'travel: NE 3')")
-
-            elif request.strip() == "scan_monsters":
-                from .compute.navigation import scan_monsters
-                if tty_chars is not None:
-                    results.append(f"scan_monsters: {scan_monsters(glyphs, tty_chars, pos)}")
-                else:
-                    results.append("scan_monsters: ERROR (no tty_chars)")
-
-            elif request.strip() == "scan_items":
-                from .compute.navigation import scan_items
-                if tty_chars is not None:
-                    results.append(f"scan_items: {scan_items(glyphs, tty_chars, pos)}")
-                else:
-                    results.append("scan_items: ERROR (no tty_chars)")
-
-            elif request.strip() == "scan_traps":
-                from .compute.navigation import scan_traps
-                if tty_chars is not None:
-                    results.append(f"scan_traps: {scan_traps(glyphs, tty_chars, pos)}")
-                else:
-                    results.append("scan_traps: ERROR (no tty_chars)")
-
-            elif request.strip() == "unexplored":
-                from .compute.navigation import find_unexplored
-                results.append(f"unexplored: {find_unexplored(glyphs, pos)}")
-
-            elif request.strip() == "exits":
-                from .compute.navigation import find_exits
-                results.append(f"exits: {find_exits(glyphs, pos)}")
-
-            elif request.strip() in ("explore_room", "explore_room:cautious"):
-                from .compute.navigation import detect_room, plan_room_exploration
-                cautious = request.strip().endswith(":cautious")
-                room = detect_room(glyphs, pos)
-                if room:
-                    # Get visited tiles for this level
-                    dlvl = int(blstats[12])
-                    visited = self.storage.get_visited_for_level(self.episode_number, dlvl)
-                    actions = plan_room_exploration(glyphs, room, pos, visited=visited)
-                    if actions:
-                        self._action_queue.extend(actions)
-                        self._queue_start_hp = self._extract_hp(obs)
-                        self._cautious_mode = cautious
-                        self._batch_source = "explore_room"
-                        self._batch_total = len(actions)
-                        self._batch_executed = 0
-                        if cautious:
-                            self._last_glyphs = glyphs.copy()
-                        mode_str = " (cautious)" if cautious else ""
-                        results.append(f"explore_room{mode_str}: EXECUTING {len(actions)} actions (auto)")
-                    else:
-                        results.append("explore_room: FULLY EXPLORED (all tiles visited) - MEMORIZE this room as explored")
-                else:
-                    results.append("explore_room: NOT IN ROOM (try explore_corridor)")
-
-            elif request.strip() in ("explore_corridor", "explore_corridor:cautious"):
-                from .compute.navigation import detect_corridor, plan_corridor_exploration
-                cautious = request.strip().endswith(":cautious")
-                corridor = detect_corridor(glyphs, pos)
-                if corridor:
-                    # Get visited tiles for this level
-                    dlvl = int(blstats[12])
-                    visited = self.storage.get_visited_for_level(self.episode_number, dlvl)
-                    actions = plan_corridor_exploration(glyphs, corridor, pos, visited=visited)
-                    if actions:
-                        self._action_queue.extend(actions)
-                        self._queue_start_hp = self._extract_hp(obs)
-                        self._cautious_mode = cautious
-                        self._batch_source = "explore_corridor"
-                        self._batch_total = len(actions)
-                        self._batch_executed = 0
-                        if cautious:
-                            self._last_glyphs = glyphs.copy()
-                        mode_str = " (cautious)" if cautious else ""
-                        results.append(f"explore_corridor{mode_str}: EXECUTING {len(actions)} actions (auto)")
-                    else:
-                        results.append("explore_corridor: FULLY EXPLORED (all tiles visited, no unexplored branches) - MEMORIZE this corridor as explored")
-                else:
-                    results.append("explore_corridor: NOT IN CORRIDOR (try explore_room)")
-
-            else:
-                results.append(f"UNKNOWN: {request}")
-
-        self._compute_result = "[COMPUTE]\n" + "\n".join(results)
-
-        # Log compute helper usage for debugging
-        self.storage.log_compute(
-            episode=self.episode_number,
-            step=self._step,
-            requests=self._pending_compute,
-            results=results,
-        )
-        self._pending_compute = []
-
     def _expand_compound_action(self, action: str) -> list[str]:
         """Expand compound action like 'open north' into ['open', 'north']."""
         parts = action.lower().split()
@@ -1063,27 +730,6 @@ class BRAIDAgent(BaseAgent):
             if cmd in self._DIRECTIONAL_COMMANDS and direction in self._DIRECTIONS:
                 return [cmd, direction]
         return [action]
-
-    def _parse_multi_actions(self, completion: str) -> list[str]:
-        """Parse single action or multi-action block from completion."""
-        # Check for <|ACTIONS|>...<|END|> block (multi-action)
-        multi_match = re.search(r"<\|ACTIONS\|>(.*?)<\|END\|>", completion, re.DOTALL)
-        if multi_match:
-            actions = [a.strip() for a in multi_match.group(1).strip().split("\n") if a.strip()]
-        elif (single_match := re.search(r"<\|ACTION\|>(.*?)<\|END\|>", completion, re.DOTALL)):
-            actions = [single_match.group(1).strip()]
-        elif self._pending_compute:
-            # COMPUTE found but no ACTION - use "wait" as safe no-op
-            # COMPUTE will be processed next turn and queue actions
-            actions = ["wait"]
-        else:
-            actions = [self._fallback_action(completion)]
-
-        # Expand compound actions (e.g., "open north" -> ["open", "north"])
-        expanded: list[str] = []
-        for action in actions:
-            expanded.extend(self._expand_compound_action(action))
-        return expanded if expanded else [self._fallback_action(completion)]
 
     def _clear_batch_state(self) -> None:
         """Clear all batch/queue tracking state."""
@@ -1177,116 +823,11 @@ class BRAIDAgent(BaseAgent):
 
         return False
 
-    def _process_memory_updates(self, mem_text: str) -> None:
-        """Parse and apply memory updates from LLM response."""
-        # Parse additions
-        add_match = re.search(r"add:\s*\[(.+?)\]", mem_text, re.DOTALL)
-        if add_match:
-            try:
-                additions = json.loads(f"[{add_match.group(1)}]")
-                for item in additions:
-                    if not isinstance(item, dict):
-                        continue
-                    tags = item.get("tags", "").lower().strip()
-                    content = item.get("content", "")
-                    scope_str = item.get("scope", "persistent").lower()
-                    prio = max(1, min(9, int(item.get("prio", 5))))
-
-                    # Auto-correct turn in actlog entries (LLM often gets it wrong)
-                    if "actlog" in tags and self._current_game_turn is not None:
-                        content = re.sub(r"^T\d+:", f"T{self._current_game_turn}:", content)
-
-                    if not tags or not content:
-                        continue
-
-                    scope = MemoryScope.EPISODE if scope_str == "episode" else MemoryScope.PERSISTENT
-
-                    entry_id = self.storage.store(
-                        MemoryEntry(
-                            tags=tags,
-                            content=content,
-                            scope=scope,
-                            priority=prio,
-                            source_episode=self.episode_number,
-                            source_step=self._step,
-                        )
-                    )
-                    self._mem_adds += 1
-                    if scope == MemoryScope.EPISODE:
-                        self._mem_episode_adds += 1
-                    else:
-                        self._mem_persistent_adds += 1
-                    if self._log_memory_details:
-                        self._added_entries.append({
-                            "id": entry_id,
-                            "scope": scope_str,
-                            "tags": tags,
-                            "prio": prio,
-                            "content": content,
-                        })
-            except (json.JSONDecodeError, ValueError):
-                self.storage.log_error(self.episode_number, self._step, "Failed to parse memory additions")
-
-        # Parse removals
-        remove_match = re.search(r"remove:\s*\[(.+?)\]", mem_text, re.DOTALL)
-        if remove_match:
-            try:
-                removals = json.loads(f"[{remove_match.group(1)}]")
-                for entry_id in removals:
-                    if isinstance(entry_id, str):
-                        removed_scope = self.storage.remove(entry_id)
-                        if removed_scope:
-                            self._mem_removes += 1
-                            if removed_scope == "episode":
-                                self._mem_episode_removes += 1
-                            else:
-                                self._mem_persistent_removes += 1
-                            if self._log_memory_details:
-                                self._removed_ids.append(entry_id)
-            except json.JSONDecodeError:
-                self.storage.log_error(self.episode_number, self._step, "Failed to parse memory removals")
-
-        # Parse enable_tags
-        enable_match = re.search(r"enable_tags:\s*\[(.+?)\]", mem_text, re.DOTALL)
-        if enable_match:
-            try:
-                tags = json.loads(f"[{enable_match.group(1)}]")
-                tags = {str(lbl).lower().strip() for lbl in tags if isinstance(lbl, str)}
-                if tags:
-                    if self._enabled_tags is not None:
-                        self._enabled_tags |= tags
-                    self._tag_changes = True
-            except json.JSONDecodeError:
-                self.storage.log_error(self.episode_number, self._step, "Failed to parse enable_tags")
-
-        # Parse disable_tags
-        disable_match = re.search(r"disable_tags:\s*\[(.+?)\]", mem_text, re.DOTALL)
-        if disable_match:
-            try:
-                tags = json.loads(f"[{disable_match.group(1)}]")
-                tags = {str(lbl).lower().strip() for lbl in tags if isinstance(lbl, str)}
-                if tags:
-                    if self._enabled_tags is None:
-                        all_tags = self.storage.all_tags()
-                        self._enabled_tags = all_tags - tags
-                    else:
-                        self._enabled_tags -= tags
-                    self._tag_changes = True
-            except json.JSONDecodeError:
-                self.storage.log_error(self.episode_number, self._step, "Failed to parse disable_tags")
-
-        # Parse reset_tags
-        reset_match = re.search(r"reset_tags:\s*(true|false)", mem_text, re.IGNORECASE)
-        if reset_match and reset_match.group(1).lower() == "true":
-            self._enabled_tags = None
-            self._tag_changes = True
-
     def reset(self) -> None:
         """Reset for new episode."""
         super().reset()
         self.episode_number += 1
         self._step = 0
-        self._enabled_tags = None
         self._episode_input_tokens = 0
         self._episode_output_tokens = 0
         self._episode_llm_calls = 0

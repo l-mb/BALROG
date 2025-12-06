@@ -2,7 +2,7 @@
 
 Exposes BRAID functionality as MCP tools that Claude can invoke directly.
 Tools are organized into three modules:
-- memory: Memory CRUD operations (add, remove, search, tag filtering)
+- memory: Memory CRUD operations (add, remove, search)
 - navigation: Map scanning and pathfinding (scan, navigate, auto_explore)
 - action: Game action execution
 """
@@ -17,7 +17,7 @@ from . import action as action_module
 from . import memory as memory_module
 from . import navigation as nav_module
 from .action import game_action
-from .memory import memory_add, memory_remove, memory_search, tag_filter
+from .memory import memory_add, memory_remove, memory_search
 from .navigation import auto_explore, navigate, scan
 
 if TYPE_CHECKING:
@@ -32,7 +32,6 @@ __all__ = [
     "memory_add",
     "memory_remove",
     "memory_search",
-    "tag_filter",
     "scan",
     "navigate",
     "auto_explore",
@@ -60,7 +59,6 @@ def create_braid_mcp_server(storage: BraidStorage) -> McpSdkServerConfig:
             memory_add,
             memory_remove,
             memory_search,
-            tag_filter,
             # Navigation tools
             scan,
             navigate,
@@ -76,7 +74,6 @@ def set_tool_context(
     storage: BraidStorage,
     episode: int,
     step: int,
-    enabled_tags: set[str] | None,
 ) -> None:
     """Set context for all tools. Call before each generate().
 
@@ -85,9 +82,8 @@ def set_tool_context(
         storage: BraidStorage instance
         episode: Current episode number
         step: Current step number
-        enabled_tags: Set of enabled memory tags, or None for all
     """
-    memory_module.set_context(storage, episode, step, enabled_tags)
+    memory_module.set_context(storage, episode, step)
     nav_module.set_context(obs, storage, episode)
 
 

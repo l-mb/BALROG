@@ -9,11 +9,32 @@ MEMORY TOOLS:
 
 - memory_remove(entry_id) - Delete outdated memory by [abc123] ID
 
-- memory_search(query, limit) - Find relevant memories by content
+- memory_search(query, tags, limit) - Find memories by content and/or tags
+  - query: Text to search for in memory content (empty string for any)
+  - tags: Comma-separated tags to filter by (empty string for any)
+  - limit: Max results to return (default 10)
 
-- tag_filter(action, tags) - Control which tags are shown
-  - action: "enable", "disable", or "reset"
-  - tags: Comma-separated tags to affect
+MEMORY EXAMPLES:
+
+Recording discoveries (episode-scoped):
+  memory_add("stairs down at @45,12", "episode", "stairs,lvl:1", 7)
+  memory_add("room @30,8 explored, has fountain", "episode", "room,lvl:1", 5)
+  memory_add("corridor @20,5-20,15 fully explored", "episode", "corridor,lvl:1", 4)
+  memory_add("blocked: @22,10 east is wall", "episode", "blocked,lvl:1", 6)
+
+Recording rules (persistent across games):
+  memory_add("floating eye: don't melee, use ranged", "persistent", "rule,monster", 8)
+  memory_add("always explore full level before descending", "persistent", "rule,strategy", 9)
+  memory_add("prayer cooldown ~800 turns", "persistent", "rule,mechanic", 7)
+
+Searching memory (by content and/or tags):
+  memory_search("stairs", "", 5)           → find stair locations
+  memory_search("", "lvl:1", 10)           → find all level 1 memories
+  memory_search("explored", "room", 10)    → find explored rooms
+  memory_search("blocked", "lvl:2", 10)    → find blocked paths on level 2
+
+Removing outdated memory:
+  memory_remove("abc123")           → delete entry shown as [abc123] in memory list
 
 SCANNING TOOLS:
 - scan(target) - View map entities. Target: monsters, items, traps, exits, unexplored
