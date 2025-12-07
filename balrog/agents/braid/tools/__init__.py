@@ -55,7 +55,6 @@ def create_braid_mcp_server(storage: BraidStorage) -> McpSdkServerConfig:
     Returns:
         McpSdkServerConfig for use with ClaudeAgentOptions.mcp_servers
     """
-    # Inject storage into memory module (navigation gets it via set_tool_context)
     memory_module._storage = storage
 
     return create_sdk_mcp_server(

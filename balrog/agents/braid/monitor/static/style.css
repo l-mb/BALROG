@@ -1,9 +1,6 @@
 /* BRAID Monitor Styles */
 
-/* ==========================================================================
-   Layout
-   ========================================================================== */
-
+/* Layout */
 .layout {
     display: flex;
     flex-direction: column;
@@ -43,10 +40,7 @@ body>main.container-fluid {
     overflow: hidden;
 }
 
-/* ==========================================================================
-   Stats Bar & Navigation
-   ========================================================================== */
-
+/* Stats Bar & Navigation */
 .stats-bar {
     flex: 0 0 auto;
     background: var(--pico-card-background-color);
@@ -147,10 +141,7 @@ body>main.container-fluid {
     font-size: 0.6rem;
 }
 
-/* ==========================================================================
-   Screen Panel
-   ========================================================================== */
-
+/* Screen Panel */
 .screen-panel {
     flex: 0 0 auto;
 }
@@ -171,10 +162,7 @@ body>main.container-fluid {
     background-color: rgba(144, 238, 144, 0.3);
 }
 
-/* ==========================================================================
-   Memory Panel
-   ========================================================================== */
-
+/* Memory Panel */
 .memory-panel {
     display: flex;
     flex-direction: column;
@@ -300,10 +288,7 @@ body>main.container-fluid {
     border-radius: 3px;
 }
 
-/* ==========================================================================
-   Conversation Panel
-   ========================================================================== */
-
+/* Conversation Panel */
 .conversation-panel {
     display: flex;
     flex-direction: column;
@@ -368,13 +353,6 @@ body>main.container-fluid {
 }
 .conv-assistant .conv-role {
     color: #2ecc71;
-}
-
-.conv-system {
-    border-left-color: #e67e22;
-}
-.conv-system .conv-role {
-    color: #e67e22;
 }
 
 .conv-thinking {
@@ -474,10 +452,7 @@ body>main.container-fluid {
     font-size: 0.55rem;
 }
 
-/* ==========================================================================
-   Common Elements
-   ========================================================================== */
-
+/* Common Elements */
 article {
     margin: 0;
     padding: 0.5rem;
@@ -496,10 +471,7 @@ article header {
     font-style: italic;
 }
 
-/* ==========================================================================
-   Todo Panel
-   ========================================================================== */
-
+/* Todo Panel */
 .todo-panel {
     flex: 0 0 auto;
 }
@@ -569,91 +541,7 @@ article header {
     color: #2ecc71;
 }
 
-/* ==========================================================================
-   Tool Panel
-   ========================================================================== */
-
-.tool-panel {
-    flex: 0 0 auto;
-    max-height: 200px;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-}
-
-.tool-list {
-    flex: 1;
-    overflow-y: auto;
-}
-
-.tool-list table {
-    font-size: 0.6rem;
-    width: 100%;
-    table-layout: fixed;
-}
-
-.tool-list th,
-.tool-list td {
-    padding: 0.15rem 0.2rem;
-    vertical-align: top;
-}
-
-.tool-list .col-step {
-    width: 2rem;
-    text-align: center;
-}
-
-.tool-list .col-tool {
-    width: 35%;
-}
-
-.tool-list .col-latency {
-    width: 2.5rem;
-    text-align: right;
-    font-family: monospace;
-}
-
-.tool-list .col-result {
-    width: auto;
-}
-
-.tool-name {
-    font-weight: bold;
-    color: #9b59b6;
-}
-
-.tool-args {
-    display: block;
-    font-size: 0.55rem;
-    color: var(--pico-muted-color);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.tool-list pre {
-    font-size: 0.55rem;
-    margin: 0;
-    padding: 0.1rem;
-    background: var(--pico-card-sectioning-background-color);
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-height: 60px;
-    overflow-y: auto;
-}
-
-.tool-error td {
-    background: rgba(231, 76, 60, 0.1);
-}
-
-.tool-error-msg {
-    color: #e74c3c;
-    font-size: 0.55rem;
-}
-
-/* ==========================================================================
-   Responsive
-   ========================================================================== */
+/* Responsive */
 
 @media (max-width: 1400px) {
     .main-columns {

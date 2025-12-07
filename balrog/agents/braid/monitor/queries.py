@@ -93,18 +93,6 @@ class MonitorDB:
             self._conn.execute("PRAGMA query_only = ON")
         return self._conn
 
-    def get_active_agents(self, minutes: int = 5) -> list[AgentInfo]:
-        """Get agents with activity in the last N minutes."""
-        rows = self.conn.execute(
-            """SELECT worker_id, MAX(episode) as ep, MAX(step) as step
-               FROM journal
-               WHERE timestamp > datetime('now', ?)
-               GROUP BY worker_id
-               ORDER BY worker_id""",
-            (f"-{minutes} minutes",),
-        ).fetchall()
-        return [AgentInfo(r["worker_id"], r["ep"] or 0, r["step"] or 0) for r in rows]
-
     def get_all_agents(self) -> list[AgentInfo]:
         """Get all agents ever seen."""
         rows = self.conn.execute(
@@ -366,31 +354,6 @@ class MonitorDB:
         ).fetchone()
         return row["max_step"] or 0
 
-    def get_latest_compute(self, worker_id: str, max_step: int | None = None) -> dict | None:
-        """Get the latest compute request/result for an agent."""
-        if max_step is not None:
-            row = self.conn.execute(
-                """SELECT step, data FROM journal
-                   WHERE worker_id = ? AND event = 'compute' AND step <= ?
-                   ORDER BY id DESC LIMIT 1""",
-                (worker_id, max_step),
-            ).fetchone()
-        else:
-            row = self.conn.execute(
-                """SELECT step, data FROM journal
-                   WHERE worker_id = ? AND event = 'compute'
-                   ORDER BY id DESC LIMIT 1""",
-                (worker_id,),
-            ).fetchone()
-        if row and row["data"]:
-            data = json.loads(row["data"])
-            return {
-                "step": row["step"],
-                "requests": data.get("requests", []),
-                "results": data.get("results", []),
-            }
-        return None
-
     def get_stats(self, worker_id: str) -> AgentStats:
         """Get aggregate stats for an agent."""
         # Response stats
@@ -544,65 +507,6 @@ class MonitorDB:
         if row:
             return (int(row["dungeon_num"]), int(row["dlvl"]))
         return None
-
-    def get_recent_tool_calls(
-        self, worker_id: str, episode: int, limit: int = 30
-    ) -> list[dict]:
-        """Get recent tool calls for an episode."""
-        # Check if tool_calls table exists
-        tables = self.conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='tool_calls'"
-        ).fetchone()
-        if not tables:
-            return []
-
-        rows = self.conn.execute(
-            """SELECT id, timestamp, step, tool_name, args, result, latency_ms, error
-               FROM tool_calls
-               WHERE worker_id = ? AND episode = ?
-               ORDER BY id DESC LIMIT ?""",
-            (worker_id, episode, limit),
-        ).fetchall()
-        return [
-            {
-                "id": r["id"],
-                "timestamp": r["timestamp"],
-                "step": r["step"],
-                "tool_name": r["tool_name"],
-                "args": json.loads(r["args"]) if r["args"] else None,
-                "result": r["result"][:200] if r["result"] else None,  # Truncate for display
-                "latency_ms": r["latency_ms"],
-                "error": r["error"],
-            }
-            for r in rows
-        ]
-
-    def get_tool_calls_for_step(
-        self, worker_id: str, episode: int, step: int
-    ) -> list[dict]:
-        """Get tool calls for a specific step."""
-        tables = self.conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='tool_calls'"
-        ).fetchone()
-        if not tables:
-            return []
-
-        rows = self.conn.execute(
-            """SELECT id, tool_name, args, result, error
-               FROM tool_calls
-               WHERE worker_id = ? AND episode = ? AND step = ?
-               ORDER BY id""",
-            (worker_id, episode, step),
-        ).fetchall()
-        return [
-            {
-                "tool_name": r["tool_name"],
-                "args": json.loads(r["args"]) if r["args"] else None,
-                "result": r["result"][:200] if r["result"] else None,
-                "error": r["error"],
-            }
-            for r in rows
-        ]
 
     def get_tool_calls_by_step(
         self, worker_id: str, episode: int, limit: int = 50

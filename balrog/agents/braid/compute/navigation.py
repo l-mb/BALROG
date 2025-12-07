@@ -713,17 +713,14 @@ def _find_room_frontiers(
     rows, cols = glyphs.shape
     frontiers = []
 
-    # S_STONE = 0 (unexplored), but also check for darkness (space character)
-    # In dark rooms, unexplored areas show as space (glyph 32 or similar)
     for x, y in room_tiles:
         unexplored_dirs = []
         for dir_name, (dy, dx) in DIRS.items():
             nx, ny = x + dx, y + dy
             if 0 <= ny < rows and 0 <= nx < cols:
                 glyph = glyphs[ny, nx]
-                # Stone (unexplored) or space (dark/unexplored)
-                if glyph == S_STONE or glyph == CMAP_OFF + 0:  # S_STONE
-                    unexplored_dirs.append(dir_name[0])  # First letter
+                if glyph == S_STONE:  # Unexplored stone
+                    unexplored_dirs.append(dir_name[0])
         if unexplored_dirs:
             frontiers.append((x, y, "".join(sorted(set(unexplored_dirs)))))
 

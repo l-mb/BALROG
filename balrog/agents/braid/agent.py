@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class BRAIDAgent(BaseAgent):
-    """BALROG Recurrent Adventuring Iterative Dungeoneer.
+    """BALROG Recurrent Agentic Iterative Dungeoneer.
 
     An agent that learns from experience through unified memory:
     - Episode memory: per-episode insights (scope=episode)

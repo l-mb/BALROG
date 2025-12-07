@@ -9,10 +9,7 @@ from typing import Any
 
 from claude_agent_sdk import tool
 
-# Action queue for game actions - picked up by agent after tool execution
 _pending_actions: list[str] = []
-
-# Track which action tools were called this turn (for multi-action detection)
 _action_tools_called: list[str] = []
 
 

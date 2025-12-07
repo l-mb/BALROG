@@ -4,7 +4,7 @@ from pathlib import Path
 
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse
+from starlette.responses import HTMLResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
@@ -127,23 +127,10 @@ def create_app(db_path: Path) -> Starlette:
             },
         )
 
-    async def debug_responses(request: Request) -> JSONResponse:
-        """Debug endpoint to check raw response data."""
-        worker_id = request.path_params["worker_id"]
-        responses = db.get_recent_responses(worker_id, limit=20)
-        agents = db.get_all_agents()
-        return JSONResponse({
-            "worker_id": worker_id,
-            "response_count": len(responses),
-            "responses": responses[:5],
-            "agents": [{"worker_id": a.worker_id, "episode": a.episode, "step": a.step} for a in agents],
-        })
-
     routes = [
         Route("/", index),
         Route("/partials/agents", partials_agents),
         Route("/partials/all/{worker_id}", partials_all),
-        Route("/debug/{worker_id}", debug_responses),
         Mount("/static", StaticFiles(directory=MONITOR_DIR / "static"), name="static"),
     ]
 
