@@ -72,8 +72,6 @@ class BRAIDAgent(BaseAgent):
         self._action_queue: list[str] = []
         self._queue_start_hp: int | None = None
         self._queue_start_hunger: int | None = None  # Hunger state when queue started (0=Satiated, 2=Hungry, etc.)
-        self._cautious_mode: bool = False
-        self._last_glyphs: Any = None  # For cautious mode discovery detection
         self._batch_source: str | None = None  # Command that created batch
         self._batch_total: int = 0  # Original queue size
         self._batch_executed: int = 0  # Actions executed so far
@@ -162,8 +160,6 @@ class BRAIDAgent(BaseAgent):
                 )
                 self._clear_batch_state()
             else:
-                # Check for newly discovered traps and re-plan if needed
-                self._check_and_replan_for_traps(obs)
                 self._step += 1
                 # Log position and screen for queued action (for Web UI)
                 queued_dlvl: int | None = None
@@ -620,113 +616,7 @@ class BRAIDAgent(BaseAgent):
         if any(p in text_lower for p in trap_triggers):
             return "Trap triggered"
 
-        # Cautious mode: abort on nearby map discovery (new glyphs appearing close to player)
-        if self._cautious_mode and self._last_glyphs is not None:
-            raw_obs = obs.get("obs", {})
-            glyphs = raw_obs.get("glyphs") if isinstance(raw_obs, dict) else None
-            if glyphs is not None:
-                import numpy as np
-                from nle import nethack
-                # Check if any new non-stone tiles appeared (discovery)
-                stone_glyph = nethack.GLYPH_CMAP_OFF + 0
-                was_stone = self._last_glyphs == stone_glyph
-                now_not_stone = glyphs != stone_glyph
-                newly_revealed = was_stone & now_not_stone
-
-                # Only abort if reveals are NEAR the player (within 3 tiles)
-                # Distant reveals (e.g., "You hear a door open") are not dangerous
-                pos_info = self._extract_position_info(obs)
-                if np.any(newly_revealed) and pos_info:
-                    px, py = pos_info[0], pos_info[1]
-                    rows, cols = glyphs.shape
-                    nearby_reveal = False
-                    for dy in range(-3, 4):
-                        for dx in range(-3, 4):
-                            ny, nx = py + dy, px + dx
-                            if 0 <= ny < rows and 0 <= nx < cols:
-                                if newly_revealed[ny, nx]:
-                                    nearby_reveal = True
-                                    break
-                        if nearby_reveal:
-                            break
-
-                    if nearby_reveal:
-                        tiles_count = int(np.sum(newly_revealed))
-                        self.storage.log_error(
-                            self.episode_number, self._step,
-                            f"Cautious abort: {tiles_count} tiles revealed nearby"
-                        )
-                        return f"New tiles discovered nearby ({tiles_count} tiles)"
-                # Update snapshot
-                self._last_glyphs = glyphs.copy()
-
         return None
-
-    def _check_and_replan_for_traps(self, obs: dict[str, Any]) -> bool:
-        """Check if new traps discovered and re-plan exploration if needed.
-
-        Returns True if queue was re-planned, False otherwise.
-        """
-        if not self._action_queue or not self._batch_source:
-            return False
-
-        # Only re-plan for exploration helpers
-        if self._batch_source not in ("explore_room", "explore_corridor"):
-            return False
-
-        raw_obs = obs.get("obs", {})
-        if not isinstance(raw_obs, dict):
-            return False
-
-        glyphs = raw_obs.get("glyphs")
-        if glyphs is None or self._last_glyphs is None:
-            return False
-
-        from nle import nethack
-
-        # Check for newly discovered traps
-        new_traps = []
-        rows, cols = glyphs.shape
-        for row in range(rows):
-            for col in range(cols):
-                glyph = int(glyphs[row, col])
-                old_glyph = int(self._last_glyphs[row, col])
-                # Trap just appeared (wasn't a trap before, is now)
-                if nethack.glyph_is_trap(glyph) and not nethack.glyph_is_trap(old_glyph):
-                    new_traps.append((col, row))
-
-        if not new_traps:
-            return False
-
-        # New trap discovered - re-plan the exploration
-        pos_info = self._extract_position_info(obs)
-        if not pos_info:
-            return False
-
-        pos = (pos_info[0], pos_info[1])
-        dungeon_num = pos_info[2]
-        dlvl = pos_info[3]
-
-        # Get visited tiles for this level
-        visited = self.storage.get_visited_for_level(self.episode_number, dungeon_num, dlvl)
-
-        # Re-plan based on exploration type (only room supported, corridor uses far commands)
-        if self._batch_source == "explore_room":
-            from .compute.navigation import detect_room, plan_room_exploration
-            room = detect_room(glyphs, pos)
-            if room:
-                new_actions = plan_room_exploration(glyphs, room, pos, visited=visited)
-                if new_actions:
-                    self._action_queue = list(new_actions)
-                    self._batch_total = len(new_actions)
-                    self._batch_executed = 0
-                    self.storage.log_error(
-                        self.episode_number, self._step,
-                        f"Re-planned room exploration around {len(new_traps)} new trap(s)"
-                    )
-                    return True
-
-        return False
 
     def _extract_hp(self, obs: dict[str, Any]) -> int | None:
         """Extract current HP from observation."""
@@ -818,8 +708,6 @@ class BRAIDAgent(BaseAgent):
         self._action_queue.clear()
         self._queue_start_hp = None
         self._queue_start_hunger = None
-        self._cautious_mode = False
-        self._last_glyphs = None
         self._batch_source = None
         self._batch_total = 0
         self._batch_executed = 0
@@ -913,12 +801,10 @@ class BRAIDAgent(BaseAgent):
         self._action_queue.clear()
         self._queue_start_hp = None
         self._queue_start_hunger = None
-        self._cautious_mode = False
-        self._last_glyphs = None
         self._batch_source = None
         self._batch_total = 0
         self._batch_executed = 0
-        self._last_dungeon_num = None  # Reset level tracking
+        self._last_dungeon_num = None
         self._last_dlvl = None
         self.storage.log_reset(self.episode_number, str(self.config.client.model_id))
 

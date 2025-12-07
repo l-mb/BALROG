@@ -342,9 +342,7 @@ async def travel(args: dict[str, Any]) -> dict[str, Any]:
     "Queue exploration actions for current room. Automatically walks to all reachable floor tiles. "
     "For corridors, use game_action('far <direction>') or travel() instead. "
     "Aborts on combat, HP drop, or hunger.",
-    {
-        "cautious": bool,  # abort on new tile discovery (for secret door hunting)
-    },
+    {},
 )
 async def auto_explore(args: dict[str, Any]) -> dict[str, Any]:
     """Queue exploration actions for room."""
@@ -357,7 +355,6 @@ async def auto_explore(args: dict[str, Any]) -> dict[str, Any]:
         return {"content": [{"type": "text", "text": "ERROR: No observation available"}], "is_error": True}
 
     glyphs, _tty_chars, _blstats, pos = obs_data
-    cautious = args.get("cautious", False)
 
     visited = _get_visited()
 
@@ -376,5 +373,4 @@ async def auto_explore(args: dict[str, Any]) -> dict[str, Any]:
 
     actions = actions[:100]
     _pending_actions = actions
-    mode_suffix = " (cautious)" if cautious else ""
-    return {"content": [{"type": "text", "text": f"auto_explore{mode_suffix}: EXECUTING {len(actions)} actions"}]}
+    return {"content": [{"type": "text", "text": f"auto_explore: EXECUTING {len(actions)} actions"}]}
