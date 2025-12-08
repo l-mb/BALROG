@@ -80,8 +80,8 @@ def expand_action(action: str) -> list[str]:
     if action_lower in COMPOUND_ACTIONS:
         return COMPOUND_ACTIONS[action_lower]
 
-    # Handle "open <direction>" pattern dynamically
-    for cmd in ["open", "close", "kick", "zap", "throw", "fire"]:
+    # Handle "command <direction>" pattern dynamically
+    for cmd in ["open", "close", "kick", "zap", "throw", "fire", "fight"]:
         if action_lower.startswith(f"{cmd} "):
             direction = action_lower[len(cmd) + 1 :].strip()
             if direction in COMPOUND_ACTIONS:

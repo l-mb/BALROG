@@ -47,6 +47,14 @@ DIRS = {
 # 27: altar, 29: throne, 30: sink, 31: fountain, 33: ice, 35-36: drawbridge
 WALKABLE_CMAP = {12, 13, 14, 19, 20, 21, 22, 23, 24, 25, 26, 27, 29, 30, 31, 33, 35, 36}
 
+# Open doors block diagonal movement (door still in frame)
+# 12 = S_ndoor (broken doorway) allows diagonal; 13-14 = open doors do not
+# 15-16 = closed doors aren't walkable at all (excluded from WALKABLE_CMAP)
+OPEN_DOOR_CMAP = {13, 14}
+
+# Wall cmap indices (vertical, horizontal, corners)
+WALL_CMAP = {1, 2, 3, 4, 5, 6}
+
 # Feature cmap indices for "nearest" command
 FEATURES = {
     "stairs_down": {24},
@@ -56,6 +64,40 @@ FEATURES = {
     "fountain": {31},
     "sink": {30},
     "throne": {29},
+}
+
+# Human-readable descriptions for CMAP indices (terrain glyphs)
+CMAP_DESCRIPTIONS = {
+    0: "solid rock (impassable!, or maybe hidden/invisible tile?)",      # S_stone (impassable unless digging)
+    1: "wall",            # S_vwall
+    2: "wall",            # S_hwall
+    3: "wall",            # S_tlcorn
+    4: "wall",            # S_trcorn
+    5: "wall",            # S_blcorn
+    6: "wall",            # S_brcorn
+    7: "tree",            # S_tree
+    12: "doorway",        # S_ndoor
+    13: "open door",      # S_vodoor
+    14: "open door",      # S_hodoor
+    15: "closed door",    # S_vcdoor
+    16: "closed door",    # S_hcdoor
+    19: "floor",          # S_room
+    20: "dark floor",     # S_darkroom
+    21: "corridor",       # S_corr
+    22: "corridor",       # S_litcorr
+    23: "stairs up",      # S_upstair
+    24: "stairs down",    # S_dnstair
+    25: "ladder up",      # S_upladder
+    26: "ladder down",    # S_dnladder
+    27: "altar",          # S_altar
+    29: "throne",         # S_throne
+    30: "sink",           # S_sink
+    31: "fountain",       # S_fountain
+    33: "ice",            # S_ice
+    35: "drawbridge",     # S_vodbridge
+    36: "drawbridge",     # S_hodbridge
+    37: "raised drawbridge",  # S_vcdbridge
+    38: "raised drawbridge",  # S_hcdbridge
 }
 
 
@@ -138,6 +180,20 @@ def nearest(
     return min(matches, key=lambda m: m[2])
 
 
+def _is_open_doorway(glyphs: np.ndarray, x: int, y: int) -> bool:
+    """Check if position is an open door (blocks diagonal movement)."""
+    rows, cols = glyphs.shape
+    if not (0 <= y < rows and 0 <= x < cols):
+        return False
+    cmap_idx = int(glyphs[y, x]) - CMAP_OFF
+    return cmap_idx in OPEN_DOOR_CMAP
+
+
+def _is_diagonal(dir_name: str) -> bool:
+    """Check if direction is diagonal."""
+    return dir_name in {"northeast", "northwest", "southeast", "southwest"}
+
+
 def pathfind(
     glyphs: np.ndarray,
     start: tuple[int, int],
@@ -145,6 +201,10 @@ def pathfind(
     extra_walkable: set[tuple[int, int]] | None = None,
 ) -> list[str] | None:
     """BFS pathfinding on explored walkable tiles.
+
+    Respects NetHack diagonal movement rules:
+    - Cannot move diagonally through intact doorways (open or closed doors)
+    - Broken doorways (S_ndoor) allow diagonal movement
 
     Args:
         glyphs: 2D glyph array from observation
@@ -188,6 +248,11 @@ def pathfind(
 
             if 0 <= ny < glyphs.shape[0] and 0 <= nx < glyphs.shape[1]:
                 if (nx, ny) not in visited and walkable[ny, nx]:
+                    # NetHack rule: can't move diagonally through open doorways
+                    if _is_diagonal(dir_name):
+                        if _is_open_doorway(glyphs, x, y) or _is_open_doorway(glyphs, nx, ny):
+                            continue  # Skip this diagonal move
+
                     new_path = path + [dir_name]
 
                     if (nx, ny) == (gx, gy):
@@ -346,11 +411,21 @@ def _is_corridor_tile(glyphs: np.ndarray, x: int, y: int) -> bool:
     return cmap_idx in CORRIDOR_CMAP  # 21, 22 = corridor, lit corridor
 
 
+def _is_wall_tile(glyphs: np.ndarray, x: int, y: int) -> bool:
+    """Check if tile is a wall (not explorable)."""
+    rows, cols = glyphs.shape
+    if not (0 <= y < rows and 0 <= x < cols):
+        return False
+    cmap_idx = int(glyphs[y, x]) - CMAP_OFF
+    return cmap_idx in WALL_CMAP  # 1-6 = walls and corners
+
+
 def find_unexplored(glyphs: np.ndarray, pos: tuple[int, int]) -> str:
     """Find exploration frontiers - places where unexplored areas can be reached.
 
-    Only reports TRUE frontiers:
-    - Corridor tiles (# characters) adjacent to unexplored stone (any direction)
+    Reports TRUE frontiers:
+    - Corridor tiles adjacent to unexplored stone (S_STONE)
+    - Corridor tiles at edge of explored area (adjacent to non-walkable, non-wall space)
 
     Does NOT report:
     - Room floor tiles (walls around rooms aren't explorable)
@@ -384,13 +459,21 @@ def find_unexplored(glyphs: np.ndarray, pos: tuple[int, int]) -> str:
             if not _is_corridor_tile(glyphs, col, row):
                 continue
 
-            # Check all 8 neighbors for unexplored tiles
+            # Check all 8 neighbors for unexplored tiles or edge of explored area
             unexplored_dirs = []
             for dir_name, (dy, dx) in all_dirs.items():
                 ny, nx = row + dy, col + dx
                 if 0 <= ny < rows and 0 <= nx < cols:
                     if glyphs[ny, nx] == S_STONE:
+                        # Adjacent to unexplored stone
                         unexplored_dirs.append(dir_name)
+                    elif not walkable[ny, nx] and not _is_wall_tile(glyphs, nx, ny):
+                        # Adjacent to non-walkable, non-wall space (edge of visible area)
+                        # This catches corridors leading into darkness/unexplored
+                        unexplored_dirs.append(dir_name)
+                else:
+                    # Out of bounds = edge of map (potential frontier)
+                    unexplored_dirs.append(dir_name)
 
             if not unexplored_dirs:
                 continue
@@ -400,7 +483,7 @@ def find_unexplored(glyphs: np.ndarray, pos: tuple[int, int]) -> str:
             frontiers.append((col, row, dirs_str, d))
 
     if not frontiers:
-        return "FULLY EXPLORED - no unexplored corridor endpoints. Search walls for secret doors or use stairs."
+        return "No known unexplored corridor endpoints. Explore unvisited doors. Search walls for secret doors or use stairs."
 
     # Sort by distance
     frontiers.sort(key=lambda f: f[3])
@@ -422,9 +505,11 @@ def find_unexplored(glyphs: np.ndarray, pos: tuple[int, int]) -> str:
 
 
 # Cmap indices for doors and corridors
-S_VCDOOR = 12  # Doorway
-S_HODOOR = 13  # Open door horizontal
-S_VODOOR = 14  # Open door vertical
+S_NDOOR = 12   # Doorway (broken/no door - allows diagonal)
+S_VODOOR = 13  # Open door vertical (intact - no diagonal)
+S_HODOOR = 14  # Open door horizontal (intact - no diagonal)
+S_VCDOOR = 15  # Closed door vertical (intact - no diagonal)
+S_HCDOOR = 16  # Closed door horizontal (intact - no diagonal)
 S_CORR = 21    # Corridor
 S_LITCORR = 22  # Lit corridor
 DOOR_CMAP = {12, 13, 14, 15, 16}  # All door types
@@ -559,10 +644,16 @@ def detect_room(
 def _find_perimeter(
     room_tiles: set[tuple[int, int]],
 ) -> list[tuple[int, int]]:
-    """Find perimeter tiles (room tiles adjacent to non-room)."""
+    """Find perimeter tiles (room tiles cardinally adjacent to non-room).
+
+    Uses only cardinal directions (N/S/E/W) to avoid marking interior tiles
+    near corners as perimeter. This ensures the perimeter is exactly the
+    tiles along the walls, not the second row/column in from walls.
+    """
     perimeter = []
     for x, y in room_tiles:
-        for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0), (1, 1), (1, -1), (-1, 1), (-1, -1)]:
+        # Only check cardinal neighbors - diagonal adjacency to walls doesn't count
+        for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
             if (x + dx, y + dy) not in room_tiles:
                 perimeter.append((x, y))
                 break
@@ -572,10 +663,11 @@ def _find_perimeter(
 def _order_perimeter(
     perimeter: list[tuple[int, int]], start: tuple[int, int]
 ) -> list[tuple[int, int]]:
-    """Order perimeter tiles for efficient clockwise walk around the room.
+    """Order perimeter tiles for wall-following walk around the room.
 
-    Uses connected-component walking to trace the perimeter rather than
-    greedy nearest-neighbor which can jump around and miss tiles.
+    Uses contour tracing to walk around the perimeter systematically.
+    Maintains a "last direction" to prefer continuing in the same direction,
+    creating a smooth wall-following path rather than random jumps.
     """
     if not perimeter:
         return []
@@ -585,32 +677,55 @@ def _order_perimeter(
     # Start from nearest to current position
     first = min(perimeter_set, key=lambda p: distance(start[0], start[1], p[0], p[1]))
 
-    # Walk around the perimeter by following adjacent tiles
-    # Priority: clockwise order (E, SE, S, SW, W, NW, N, NE)
-    clockwise_dirs = [(1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)]
+    # All 8 directions in clockwise order starting from East
+    # (dx, dy) format
+    all_dirs = [
+        (1, 0),    # E
+        (1, 1),    # SE
+        (0, 1),    # S
+        (-1, 1),   # SW
+        (-1, 0),   # W
+        (-1, -1),  # NW
+        (0, -1),   # N
+        (1, -1),   # NE
+    ]
 
     ordered = [first]
-    visited = {first}
+    visited_set = {first}
     current = first
+    last_dir_idx = 0  # Start facing East
 
-    while len(visited) < len(perimeter_set):
-        # Find next unvisited perimeter tile, preferring clockwise order
+    while len(visited_set) < len(perimeter_set):
+        # Try directions starting from ~90 degrees right of last direction (wall-following)
+        # This implements right-hand rule: keep the wall on your right
         next_tile = None
-        for dx, dy in clockwise_dirs:
+        start_idx = (last_dir_idx + 6) % 8  # Start checking from 90° right (counterclockwise)
+
+        for i in range(8):
+            dir_idx = (start_idx + i) % 8
+            dx, dy = all_dirs[dir_idx]
             neighbor = (current[0] + dx, current[1] + dy)
-            if neighbor in perimeter_set and neighbor not in visited:
+            if neighbor in perimeter_set and neighbor not in visited_set:
                 next_tile = neighbor
+                last_dir_idx = dir_idx
                 break
 
         if next_tile is None:
             # No adjacent unvisited - jump to nearest unvisited
-            unvisited = perimeter_set - visited
+            unvisited = perimeter_set - visited_set
             if not unvisited:
                 break
             next_tile = min(unvisited, key=lambda p: distance(current[0], current[1], p[0], p[1]))
+            # Reset direction based on jump direction
+            dx = next_tile[0] - current[0]
+            dy = next_tile[1] - current[1]
+            for i, (ddx, ddy) in enumerate(all_dirs):
+                if (ddx > 0) == (dx > 0) and (ddy > 0) == (dy > 0):
+                    last_dir_idx = i
+                    break
 
         ordered.append(next_tile)
-        visited.add(next_tile)
+        visited_set.add(next_tile)
         current = next_tile
 
     return ordered
@@ -621,12 +736,15 @@ def plan_visited_aware_exploration(
     walkable_tiles: set[tuple[int, int]],
     pos: tuple[int, int],
     visited: set[tuple[int, int]],
-) -> list[str]:
+) -> tuple[list[str], str]:
     """Plan room exploration by walking unvisited perimeter tiles.
 
     Only walks wall-adjacent tiles (perimeter) since inner tiles don't need
     to be visited - items/monsters are visible from anywhere in a lit room.
     Searches at each perimeter tile for secret doors.
+
+    Uses wall-hugging: once on perimeter, only moves to adjacent perimeter tiles
+    rather than taking shortcuts through the room interior.
 
     Args:
         glyphs: 2D glyph array from observation
@@ -635,7 +753,9 @@ def plan_visited_aware_exploration(
         visited: Set of tiles player has stepped on this episode/level
 
     Returns:
-        List of actions to walk perimeter with searches
+        Tuple of (actions, status_message):
+        - actions: List of actions to walk perimeter with searches
+        - status_message: "complete", "partial_hazard", or "blocked_hazard"
     """
     # Find perimeter tiles (wall-adjacent) - only these need to be walked
     perimeter = set(_find_perimeter(walkable_tiles))
@@ -643,17 +763,12 @@ def plan_visited_aware_exploration(
 
     if not unvisited_perimeter:
         # All perimeter tiles visited - room fully explored
-        return []
+        return [], "complete"
 
-    # Only walk unvisited perimeter tiles
-    targets = unvisited_perimeter
-
-    # BFS tour through targets, using visited as known-walkable
-    # Combine visited (confirmed) + walkable_tiles (visible) for pathfinding
+    # Build walkable set for pathfinding
     extra_walkable = visited | walkable_tiles | {pos}
 
     # Also add monster/pet positions as walkable (can swap places)
-    # Check both within walkable_tiles AND adjacent to them (pet might be blocking path)
     rows, cols = glyphs.shape
     tiles_to_check = set(walkable_tiles)
     for x, y in walkable_tiles:
@@ -668,36 +783,194 @@ def plan_visited_aware_exploration(
             if nethack.glyph_is_monster(glyph) or nethack.glyph_is_pet(glyph):
                 extra_walkable.add((x, y))
 
-    # Use ordered perimeter walk for systematic coverage instead of greedy nearest
-    ordered_targets = _order_perimeter(list(targets), pos)
-
     actions: list[str] = []
     current = pos
+    visited_this_walk: set[tuple[int, int]] = set()
 
-    for target in ordered_targets:
-        path = pathfind(glyphs, current, target, extra_walkable)
+    # Identify hazards to avoid: traps, water, lava, boulders
+    hazards: set[tuple[int, int]] = set()
+    for x, y in walkable_tiles:
+        if 0 <= y < rows and 0 <= x < cols:
+            glyph = int(glyphs[y, x])
+            # Traps (^)
+            if nethack.glyph_is_trap(glyph):
+                hazards.add((x, y))
+            # Check cmap for water/lava/boulders
+            cmap_idx = glyph - CMAP_OFF
+            if cmap_idx in {32, 34}:  # 32=pool, 34=lava
+                hazards.add((x, y))
+    # Also check for boulders (object glyph for boulder)
+    for x, y in walkable_tiles:
+        if 0 <= y < rows and 0 <= x < cols:
+            glyph = int(glyphs[y, x])
+            if nethack.glyph_is_object(glyph):
+                # Boulder is object class ROCK_CLASS, but simplest check is the symbol
+                # Boulder shows as '0' (zero) or backtick in some tilesets
+                # For safety, we can check if it's a boulder by object ID
+                # nethack.GLYPH_OBJ_OFF + boulder_id, but simpler: avoid all large objects
+                obj_id = glyph - nethack.GLYPH_OBJ_OFF
+                if 0 <= obj_id < nethack.NUM_OBJECTS:
+                    # Boulder is typically object 1 (first in objects.h)
+                    if obj_id == 1:  # BOULDER
+                        hazards.add((x, y))
 
+    # Safe walkable = walkable minus hazards
+    safe_walkable = (extra_walkable | walkable_tiles) - hazards
+
+    # If starting on perimeter, begin wall-hugging immediately
+    # Otherwise, pathfind to nearest perimeter tile first
+    if current not in perimeter:
+        nearest = min(unvisited_perimeter, key=lambda p: distance(current[0], current[1], p[0], p[1]))
+        path = pathfind(glyphs, current, nearest, safe_walkable)
         if path is None:
-            # No path found - try from current position with all walkable as extra
-            # This handles cases where the path requires going through visited tiles
-            path = pathfind(glyphs, current, target, extra_walkable | walkable_tiles)
-
-        if path is None:
-            # Still no path - skip this target but continue with others
-            continue
-
+            # No safe path - abort rather than risk hazards
+            return [], "blocked_hazard"
         actions.extend(path)
-        current = target  # Only update position after successful path
-
-        # Search if at perimeter
-        if target in perimeter:
+        current = nearest
+        visited_this_walk.add(nearest)
+        if nearest in perimeter:
             actions.append("search")
 
-        # Limit actions per call to avoid very long queues
-        if len(actions) > 200:
-            break
+    # Wall-hug: prefer cardinal moves along walls, only use diagonals at corners
+    # Cardinal directions in clockwise order starting from E
+    cardinal_dirs = [
+        (1, 0, 0),    # E, idx 0
+        (0, 1, 2),    # S, idx 2
+        (-1, 0, 4),   # W, idx 4
+        (0, -1, 6),   # N, idx 6
+    ]
+    # All 8 directions for fallback
+    all_dirs = [
+        (1, 0),    # E, idx 0
+        (1, 1),    # SE, idx 1
+        (0, 1),    # S, idx 2
+        (-1, 1),   # SW, idx 3
+        (-1, 0),   # W, idx 4
+        (-1, -1),  # NW, idx 5
+        (0, -1),   # N, idx 6
+        (1, -1),   # NE, idx 7
+    ]
+    last_dir_idx = 0  # Track direction for right-hand rule
 
-    return actions
+    while len(actions) < 200:
+        # Find next unvisited perimeter tile using wall-following
+        # Prefer adjacent tiles, but pathfind around hazards if needed
+        next_tile = None
+        next_path: list[str] | None = None
+
+        # For rectangular rooms: prefer cardinal directions along walls
+        # Check cardinal directions first in right-hand rule order
+        # Start from 90° clockwise of opposite direction (wall on right)
+        cardinal_start = ((last_dir_idx + 6) % 8) // 2  # Map 8-dir to 4-dir
+        for i in range(4):
+            card_idx = (cardinal_start + i) % 4
+            dx, dy, dir_idx = cardinal_dirs[card_idx]
+            neighbor = (current[0] + dx, current[1] + dy)
+            if neighbor in perimeter and neighbor not in visited and neighbor not in visited_this_walk:
+                if neighbor not in hazards:
+                    if neighbor in safe_walkable or _is_walkable_glyph(glyphs, neighbor[0], neighbor[1]):
+                        next_tile = neighbor
+                        last_dir_idx = dir_idx
+                        break
+
+        # If no cardinal move found, try diagonals (for non-rectangular rooms or corners)
+        if next_tile is None:
+            start_idx = (last_dir_idx + 6) % 8
+            for i in range(8):
+                dir_idx = (start_idx + i) % 8
+                if dir_idx % 2 == 0:  # Skip cardinals, already checked
+                    continue
+                dx, dy = all_dirs[dir_idx]
+                neighbor = (current[0] + dx, current[1] + dy)
+                if neighbor in perimeter and neighbor not in visited and neighbor not in visited_this_walk:
+                    if neighbor not in hazards:
+                        if neighbor in safe_walkable or _is_walkable_glyph(glyphs, neighbor[0], neighbor[1]):
+                            next_tile = neighbor
+                            last_dir_idx = dir_idx
+                            break
+
+        # Second pass: if no direct path, try short pathfinding to nearby perimeter tiles
+        if next_tile is None:
+            # Look for perimeter tiles within 3 steps that we can pathfind to
+            candidates = []
+            for i in range(8):
+                dir_idx = (start_idx + i) % 8
+                dx, dy = all_dirs[dir_idx]
+                neighbor = (current[0] + dx, current[1] + dy)
+                if neighbor in perimeter and neighbor not in visited and neighbor not in visited_this_walk:
+                    candidates.append((neighbor, dir_idx))
+
+            for candidate, dir_idx in candidates:
+                path = pathfind(glyphs, current, candidate, safe_walkable)
+                if path and len(path) <= 4:  # Short detour acceptable
+                    next_tile = candidate
+                    next_path = path
+                    last_dir_idx = dir_idx
+                    break
+
+        if next_tile is None:
+            # No adjacent unvisited perimeter - check if any unvisited remain
+            remaining = unvisited_perimeter - visited_this_walk
+            if not remaining:
+                break  # Done - all perimeter visited
+            # Jump to nearest unvisited (may need to cross room)
+            nearest = min(remaining, key=lambda p: distance(current[0], current[1], p[0], p[1]))
+            path = pathfind(glyphs, current, nearest, safe_walkable)
+            if path is None:
+                # No safe path to remaining perimeter - abort and let assistant handle
+                # Return what we have so far, plus a marker that exploration is incomplete
+                break
+            actions.extend(path)
+            current = nearest
+            visited_this_walk.add(nearest)
+            if nearest in perimeter:
+                actions.append("search")
+            # Update direction for next iteration
+            last_move = path[-1]
+            dir_names = ["east", "southeast", "south", "southwest", "west", "northwest", "north", "northeast"]
+            for i, name in enumerate(dir_names):
+                if last_move == name:
+                    last_dir_idx = i
+                    break
+            continue
+
+        # Move to next perimeter tile (direct or via short path)
+        if next_path:
+            actions.extend(next_path)
+        else:
+            dx, dy = next_tile[0] - current[0], next_tile[1] - current[1]
+            move_dir: str | None = None
+            for name, (ddy, ddx) in DIRS.items():
+                if ddx == dx and ddy == dy:
+                    move_dir = name
+                    break
+            if move_dir:
+                actions.append(move_dir)
+
+        current = next_tile
+        visited_this_walk.add(next_tile)
+        actions.append("search")
+
+    # Determine final status
+    remaining = unvisited_perimeter - visited_this_walk
+    if remaining:
+        return actions, "partial_hazard"
+    return actions, "complete"
+
+
+def _is_walkable_glyph(glyphs: np.ndarray, x: int, y: int) -> bool:
+    """Check if a tile has a walkable glyph (floor, door, corridor, etc.)."""
+    rows, cols = glyphs.shape
+    if not (0 <= y < rows and 0 <= x < cols):
+        return False
+    glyph = int(glyphs[y, x])
+    cmap_idx = glyph - CMAP_OFF
+    if cmap_idx in WALKABLE_CMAP:
+        return True
+    # Items/monsters on floor are walkable
+    if nethack.glyph_is_object(glyph) or nethack.glyph_is_monster(glyph) or nethack.glyph_is_pet(glyph):
+        return True
+    return False
 
 
 def _find_room_frontiers(
@@ -732,7 +1005,7 @@ def plan_room_exploration(
     room_tiles: set[tuple[int, int]],
     pos: tuple[int, int],
     visited: set[tuple[int, int]] | None = None,
-) -> list[str]:
+) -> tuple[list[str], str]:
     """Plan room exploration using visited-aware algorithm.
 
     Handles lit, dark, and partially lit rooms uniformly by prioritizing
@@ -745,7 +1018,9 @@ def plan_room_exploration(
         visited: Set of tiles player has stepped on (optional)
 
     Returns:
-        List of actions (directions + "search")
+        Tuple of (actions, status):
+        - actions: List of actions (directions + "search")
+        - status: "complete", "partial_hazard", or "blocked_hazard"
     """
     # Find tiles with items/monsters that need to be walkable for pathfinding
     extra_walkable = {pos}
@@ -758,9 +1033,9 @@ def plan_room_exploration(
 
     # Use visited-aware exploration if visited data available
     if visited:
-        actions = plan_visited_aware_exploration(glyphs, room_tiles, pos, visited)
+        actions, status = plan_visited_aware_exploration(glyphs, room_tiles, pos, visited)
         if actions:
-            return actions
+            return actions, status
         # All visible tiles visited - check for frontiers to expand into
 
         # Find room frontiers (tiles adjacent to unexplored stone)
@@ -782,7 +1057,7 @@ def plan_room_exploration(
                             actions.extend([dir_map[first_dir]] * 3)
                             actions.append("search")
                         break
-                return actions
+                return actions, "complete"
 
         # Dark room detection: small visible area might mean more room exists
         # If room is small and no frontiers, try walking to furthest unvisited perimeter tile
@@ -796,34 +1071,34 @@ def plan_room_exploration(
                 if path:
                     actions = list(path)
                     actions.append("search")
-                    return actions
+                    return actions, "complete"
             # All perimeter visited in small room - room is fully explored
             # Don't try walking into walls, that causes infinite loops
 
         # All tiles visited, no frontiers - room fully explored
-        return []
+        return [], "complete"
 
     # Fallback: perimeter walk (only when no visited data available)
     perimeter_list = _find_perimeter(room_tiles)
     if not perimeter_list:
-        return []
+        return [], "complete"
 
     ordered = _order_perimeter(perimeter_list, pos)
 
     # Generate actions
-    actions = []
+    fallback_actions: list[str] = []
     current = pos
 
     for target in ordered:
         # Path to target
         path = pathfind(glyphs, current, target, extra_walkable)
         if path is not None:  # None = no path, [] = already there
-            actions.extend(path)
+            fallback_actions.extend(path)
             current = target
             # Search at wall
-            actions.append("search")
+            fallback_actions.append("search")
 
-    return actions
+    return fallback_actions, "complete"
 
 
 
@@ -879,3 +1154,41 @@ def find_exits(glyphs: np.ndarray, pos: tuple[int, int]) -> str:
     # Sort by distance
     exits.sort(key=lambda e: e[4])
     return " ".join(f"{e[0]}@{e[1]},{e[2]}({e[3]},{e[4]})" for e in exits[:10])
+
+
+def _glyph_to_description(glyph: int) -> str:
+    """Convert glyph to human-readable description."""
+    if nethack.glyph_is_pet(glyph):
+        return "pet"
+    if nethack.glyph_is_monster(glyph):
+        return "monster"
+    if nethack.glyph_is_object(glyph):
+        return "item"
+    if nethack.glyph_is_trap(glyph):
+        return "trap"
+    if glyph >= CMAP_OFF:
+        cmap_idx = glyph - CMAP_OFF
+        return CMAP_DESCRIPTIONS.get(cmap_idx, f"terrain({cmap_idx})")
+    return "unknown"
+
+
+def describe_adjacent_tiles(
+    glyphs: np.ndarray,
+    tty_chars: np.ndarray,
+    pos: tuple[int, int],
+) -> str:
+    """Describe all 8 adjacent tiles with glyph char and meaning."""
+    px, py = pos
+    lines = []
+
+    for dir_name, (dy, dx) in DIRS.items():
+        nx, ny = px + dx, py + dy
+        if 0 <= ny < glyphs.shape[0] and 0 <= nx < glyphs.shape[1]:
+            glyph = int(glyphs[ny, nx])
+            char = chr(tty_chars[ny + 1, nx])  # +1 for tty row offset
+            desc = _glyph_to_description(glyph)
+            lines.append(f"{dir_name}: {desc} {char}")
+        else:
+            lines.append(f"{dir_name}: (out of bounds)")
+
+    return "What's directly adjacent & surrounding the player character (consult map for more):\n" + "\n".join(lines)

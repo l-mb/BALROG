@@ -89,7 +89,7 @@ async def memory_remove(args: dict[str, Any]) -> dict[str, Any]:
         return {"content": [{"type": "text", "text": "ERROR: Storage not initialized"}], "is_error": True}
 
     entry_id = args["entry_id"]
-    result = _storage.remove(entry_id)
+    result = _storage.remove(entry_id, step=_step)
 
     if result is None:
         return {"content": [{"type": "text", "text": f"NOT FOUND: [{entry_id}]"}]}

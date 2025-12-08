@@ -30,13 +30,12 @@
             Auto
           </label>
           <div id="step-nav" class="step-nav hidden">
-            <button onclick="stepNav(-10)" title="-10">&laquo;</button>
-            <button onclick="stepNav(-1)" title="-1">&lsaquo;</button>
+            <button id="btn-back10" title="-10 (hold: first)">&laquo;</button>
+            <button id="btn-back1" title="-1">&lsaquo;</button>
             <span id="step-display">-/-</span>
-            <button onclick="stepNav(1)" title="+1">&rsaquo;</button>
-            <button onclick="stepNav(10)" title="+10">&raquo;</button>
+            <button id="btn-fwd1" title="+1">&rsaquo;</button>
+            <button id="btn-fwd10" title="+10 (hold: latest)">&raquo;</button>
             <button id="play-btn" onclick="togglePlayback()" title="Play">&#9654;</button>
-            <button onclick="stepNav(Infinity)" title="Latest">Live</button>
           </div>
         </div>
         <!-- Stats - swapped via htmx -->
@@ -131,7 +130,9 @@
       }
 
       if (delta === Infinity) {
-        currentStep = null;  // Go to latest
+        currentStep = null;  // Go to latest (live)
+      } else if (delta === -Infinity) {
+        currentStep = 1;  // Go to first step
       } else {
         if (currentStep === null) {
           currentStep = maxStep;
@@ -325,6 +326,59 @@
       }
       updateStepDisplay();
     });
+
+    // Long-press detection for step navigation buttons
+    const LONG_PRESS_MS = 400;
+
+    function setupStepButton(btnId, shortAction, longAction) {
+      const btn = document.getElementById(btnId);
+      if (!btn) return;
+
+      let pressTimer = null;
+      let longPressTriggered = false;
+
+      btn.addEventListener('mousedown', (e) => {
+        longPressTriggered = false;
+        pressTimer = setTimeout(() => {
+          longPressTriggered = true;
+          longAction();
+        }, LONG_PRESS_MS);
+      });
+
+      btn.addEventListener('mouseup', () => {
+        clearTimeout(pressTimer);
+        if (!longPressTriggered) {
+          shortAction();
+        }
+      });
+
+      btn.addEventListener('mouseleave', () => {
+        clearTimeout(pressTimer);
+      });
+
+      // Touch support
+      btn.addEventListener('touchstart', (e) => {
+        longPressTriggered = false;
+        pressTimer = setTimeout(() => {
+          longPressTriggered = true;
+          longAction();
+        }, LONG_PRESS_MS);
+      });
+
+      btn.addEventListener('touchend', (e) => {
+        clearTimeout(pressTimer);
+        if (!longPressTriggered) {
+          shortAction();
+        }
+        e.preventDefault();  // Prevent mouse events
+      });
+    }
+
+    // Setup step navigation buttons with long-press
+    setupStepButton('btn-back10', () => stepNav(-10), () => stepNav(-Infinity));  // Long: first
+    setupStepButton('btn-back1', () => stepNav(-1), () => stepNav(-1));
+    setupStepButton('btn-fwd1', () => stepNav(1), () => stepNav(1));
+    setupStepButton('btn-fwd10', () => stepNav(10), () => stepNav(Infinity));     // Long: latest
 
     // Initialize panels URL on page load
     updatePanelsUrl();

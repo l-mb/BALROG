@@ -199,7 +199,7 @@ class MonitorDB:
             rows = self.conn.execute(
                 """SELECT step, data FROM journal
                    WHERE worker_id = ? AND event = 'sdk_prompt'
-                         AND json_extract(data, '$.episode') = ? AND step <= ?
+                         AND episode = ? AND step <= ?
                    ORDER BY step DESC LIMIT ?""",
                 (worker_id, episode, max_step, limit),
             ).fetchall()
@@ -207,8 +207,9 @@ class MonitorDB:
             rows = self.conn.execute(
                 """SELECT step, data FROM journal
                    WHERE worker_id = ? AND event = 'sdk_prompt'
+                         AND episode = ?
                    ORDER BY step DESC LIMIT ?""",
-                (worker_id, limit),
+                (worker_id, episode, limit),
             ).fetchall()
 
         result = []
@@ -417,6 +418,7 @@ class MonitorDB:
         scope: str | None = None,
         include_deleted: bool = False,
         episode: int | None = None,
+        max_step: int | None = None,
     ) -> list[dict]:
         """Get memory entries ordered by recency.
 
@@ -425,12 +427,20 @@ class MonitorDB:
             scope: Filter by 'persistent' or 'episode', or None for all
             include_deleted: If True, include soft-deleted entries
             episode: Filter episode-scoped memories to this episode only
+            max_step: If provided, show entries as they existed at this step
         """
         conditions = []
         params: list[str | int] = []
 
-        if not include_deleted:
-            conditions.append("deleted = 0")
+        # Temporal filtering: show entries as they existed at max_step
+        if max_step is not None:
+            conditions.append("source_step <= ?")
+            params.append(max_step)
+            if not include_deleted:
+                conditions.append("(deleted_step IS NULL OR deleted_step > ?)")
+                params.append(max_step)
+        elif not include_deleted:
+            conditions.append("deleted_step IS NULL")
 
         if scope == "persistent":
             conditions.append("scope = 'persistent'")
@@ -449,7 +459,7 @@ class MonitorDB:
         params.append(limit)
 
         rows = self.conn.execute(
-            f"""SELECT id, tags, content, scope, priority, source_episode, source_step, created_at, deleted
+            f"""SELECT id, tags, content, scope, priority, source_episode, source_step, created_at, deleted_step
                FROM memory {where}
                ORDER BY created_at DESC
                LIMIT ?""",
@@ -509,22 +519,31 @@ class MonitorDB:
         return None
 
     def get_tool_calls_by_step(
-        self, worker_id: str, episode: int, limit: int = 50
+        self, worker_id: str, episode: int, max_step: int | None = None, limit: int = 50
     ) -> dict[int, list[dict]]:
-        """Get tool calls grouped by step for an episode."""
+        """Get tool calls grouped by step for an episode, optionally up to a step."""
         tables = self.conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='tool_calls'"
         ).fetchone()
         if not tables:
             return {}
 
-        rows = self.conn.execute(
-            """SELECT step, tool_name, args, result, error
-               FROM tool_calls
-               WHERE worker_id = ? AND episode = ?
-               ORDER BY id DESC LIMIT ?""",
-            (worker_id, episode, limit),
-        ).fetchall()
+        if max_step is not None:
+            rows = self.conn.execute(
+                """SELECT step, tool_name, args, result, error
+                   FROM tool_calls
+                   WHERE worker_id = ? AND episode = ? AND step <= ?
+                   ORDER BY id DESC LIMIT ?""",
+                (worker_id, episode, max_step, limit),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                """SELECT step, tool_name, args, result, error
+                   FROM tool_calls
+                   WHERE worker_id = ? AND episode = ?
+                   ORDER BY id DESC LIMIT ?""",
+                (worker_id, episode, limit),
+            ).fetchall()
 
         by_step: dict[int, list[dict]] = {}
         for r in rows:
@@ -542,8 +561,8 @@ class MonitorDB:
             by_step[step] = list(reversed(by_step[step]))
         return by_step
 
-    def get_todos(self, worker_id: str, episode: int) -> list[dict]:
-        """Get todos for an episode."""
+    def get_todos(self, worker_id: str, episode: int, max_step: int | None = None) -> list[dict]:
+        """Get todos as they existed at a specific step."""
         # Check if todos table exists
         tables = self.conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='todos'"
@@ -551,12 +570,29 @@ class MonitorDB:
         if not tables:
             return []
 
+        # Find the most recent snapshot step at or before max_step
+        if max_step is not None:
+            row = self.conn.execute(
+                "SELECT MAX(step) FROM todos WHERE worker_id = ? AND episode = ? AND step <= ?",
+                (worker_id, episode, max_step),
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                "SELECT MAX(step) FROM todos WHERE worker_id = ? AND episode = ?",
+                (worker_id, episode),
+            ).fetchone()
+
+        snapshot_step = row[0] if row and row[0] is not None else None
+        if snapshot_step is None:
+            return []
+
+        # Return todos from that snapshot
         rows = self.conn.execute(
             """SELECT content, active_form, status, step, updated_at
                FROM todos
-               WHERE worker_id = ? AND episode = ?
+               WHERE worker_id = ? AND episode = ? AND step = ?
                ORDER BY id ASC""",
-            (worker_id, episode),
+            (worker_id, episode, snapshot_step),
         ).fetchall()
         return [
             {

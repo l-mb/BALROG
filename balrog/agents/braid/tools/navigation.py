@@ -341,7 +341,7 @@ async def travel(args: dict[str, Any]) -> dict[str, Any]:
     "auto_explore",
     "Queue exploration actions for current room. Automatically walks to all reachable floor tiles. "
     "For corridors, use game_action('far <direction>') or travel() instead. "
-    "Aborts on combat, HP drop, or hunger.",
+    "Aborts on combat, HP drop, hunger, or hazards (traps, water, lava, boulders).",
     {},
 )
 async def auto_explore(args: dict[str, Any]) -> dict[str, Any]:
@@ -367,10 +367,18 @@ async def auto_explore(args: dict[str, Any]) -> dict[str, Any]:
     if room_tiles is None:
         return {"content": [{"type": "text", "text": "auto_explore: NOT IN ROOM - use game_action('far <direction>') for corridors"}]}
 
-    actions = plan_room_exploration(glyphs, room_tiles, pos, visited)
+    actions, status = plan_room_exploration(glyphs, room_tiles, pos, visited)
+
+    if status == "blocked_hazard":
+        return {"content": [{"type": "text", "text": "auto_explore: BLOCKED BY HAZARD (trap/water/lava/boulder) - explore manually to avoid danger"}]}
+
     if not actions:
         return {"content": [{"type": "text", "text": "auto_explore: FULLY EXPLORED - memorize this room as explored"}]}
 
     actions = actions[:100]
     _pending_actions = actions
+
+    if status == "partial_hazard":
+        return {"content": [{"type": "text", "text": f"auto_explore: EXECUTING {len(actions)} actions (PARTIAL - hazard blocks some areas, explore those manually)"}]}
+
     return {"content": [{"type": "text", "text": f"auto_explore: EXECUTING {len(actions)} actions"}]}

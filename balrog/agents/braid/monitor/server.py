@@ -61,9 +61,10 @@ def create_app(db_path: Path) -> Starlette:
             scope = None
         include_deleted = request.query_params.get("deleted") == "1"
 
-        # Pass current episode for episode-scoped memory filtering
+        # Pass current episode and step for temporal filtering
         entries = db.get_memory_entries(
-            limit=50, scope=scope, include_deleted=include_deleted, episode=current_episode
+            limit=50, scope=scope, include_deleted=include_deleted, episode=current_episode,
+            max_step=current_step
         )
 
         # Get full prompt and response for debug panel (filter by episode)
@@ -95,13 +96,13 @@ def create_app(db_path: Path) -> Starlette:
                     row_data.append((char, is_visited))
                 screen_rows.append(row_data)
 
-        # Get todos
-        todos = db.get_todos(worker_id, current_episode) if current_episode else []
+        # Get todos (with temporal filtering)
+        todos = db.get_todos(worker_id, current_episode, max_step=current_step) if current_episode else []
 
-        # Get tool calls grouped by step (for all conversation history)
+        # Get tool calls grouped by step (filtered by current step for history view)
         tool_calls_by_step: dict[int, list] = {}
         if current_episode is not None:
-            tool_calls_by_step = db.get_tool_calls_by_step(worker_id, current_episode)
+            tool_calls_by_step = db.get_tool_calls_by_step(worker_id, current_episode, max_step=current_step)
 
         return templates.TemplateResponse(
             request,

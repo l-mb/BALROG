@@ -30,7 +30,7 @@ class MemoryEntry:
     priority: int = 5
     source_episode: int | None = None
     source_step: int | None = None
-    deleted: bool = False
+    deleted_step: int | None = None  # NULL = active, step number = deleted at that step
     entry_id: str = ""
     created_at: str = ""
 
@@ -44,13 +44,13 @@ CREATE TABLE IF NOT EXISTS memory (
     priority INTEGER NOT NULL DEFAULT 5 CHECK (priority BETWEEN 1 AND 9),
     source_episode INTEGER,
     source_step INTEGER,
-    deleted INTEGER NOT NULL DEFAULT 0,
+    deleted_step INTEGER DEFAULT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_memory_scope ON memory(scope, deleted);
+CREATE INDEX IF NOT EXISTS idx_memory_scope ON memory(scope, deleted_step);
 CREATE INDEX IF NOT EXISTS idx_memory_episode ON memory(source_episode) WHERE scope = 'episode';
-CREATE INDEX IF NOT EXISTS idx_memory_priority ON memory(priority DESC) WHERE deleted = 0;
+CREATE INDEX IF NOT EXISTS idx_memory_priority ON memory(priority DESC) WHERE deleted_step IS NULL;
 
 CREATE TABLE IF NOT EXISTS journal (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -140,7 +140,7 @@ class BraidStorage:
     def store(self, entry: MemoryEntry) -> str:
         entry_id = str(uuid.uuid4())[:8]
         self.conn.execute(
-            """INSERT INTO memory (id, tags, content, scope, priority, source_episode, source_step, deleted, created_at)
+            """INSERT INTO memory (id, tags, content, scope, priority, source_episode, source_step, deleted_step, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 entry_id,
@@ -150,7 +150,7 @@ class BraidStorage:
                 entry.priority,
                 entry.source_episode,
                 entry.source_step,
-                int(entry.deleted),
+                entry.deleted_step,
                 self._now(),
             ),
         )
@@ -163,19 +163,29 @@ class BraidStorage:
         scope: MemoryScope | None = None,
         episode: int | None = None,
         limit: int = 20,
+        max_step: int | None = None,
     ) -> list[MemoryEntry]:
-        query = "SELECT * FROM memory WHERE deleted = 0"
+        conditions = []
         params: list[Any] = []
 
+        # Temporal filtering: show entries as they existed at max_step
+        if max_step is not None:
+            conditions.append("source_step <= ?")
+            params.append(max_step)
+            conditions.append("(deleted_step IS NULL OR deleted_step > ?)")
+            params.append(max_step)
+        else:
+            conditions.append("deleted_step IS NULL")
+
         if scope is not None:
-            query += " AND scope = ?"
+            conditions.append("scope = ?")
             params.append(scope.value)
 
         if episode is not None:
-            query += " AND (scope != 'episode' OR source_episode = ?)"
+            conditions.append("(scope != 'episode' OR source_episode = ?)")
             params.append(episode)
 
-        query += " ORDER BY priority DESC LIMIT ?"
+        query = f"SELECT * FROM memory WHERE {' AND '.join(conditions)} ORDER BY priority DESC LIMIT ?"
         params.append(limit)
 
         rows = self.conn.execute(query, params).fetchall()
@@ -206,7 +216,7 @@ class BraidStorage:
             # Need to filter in Python for tag matching
             return len(self.retrieve(tags=tags, scope=scope, episode=episode, limit=10000))
 
-        query = "SELECT COUNT(*) FROM memory WHERE deleted = 0"
+        query = "SELECT COUNT(*) FROM memory WHERE deleted_step IS NULL"
         params: list[Any] = []
 
         if scope is not None:
@@ -233,30 +243,31 @@ class BraidStorage:
                     counts[tag] = counts.get(tag, 0) + 1
         return counts
 
-    def remove(self, entry_id: str) -> str | None:
-        """Remove entry by ID. Returns scope ('episode'/'persistent') if found, None otherwise."""
+    def remove(self, entry_id: str, step: int | None = None) -> str | None:
+        """Remove entry by ID at given step. Returns scope ('episode'/'persistent') if found, None otherwise."""
         row = self.conn.execute(
-            "SELECT scope FROM memory WHERE id = ? AND deleted = 0", (entry_id,)
+            "SELECT scope FROM memory WHERE id = ? AND deleted_step IS NULL", (entry_id,)
         ).fetchone()
         if not row:
             return None
         self.conn.execute(
-            "UPDATE memory SET deleted = 1 WHERE id = ? AND deleted = 0", (entry_id,)
+            "UPDATE memory SET deleted_step = ? WHERE id = ? AND deleted_step IS NULL",
+            (step, entry_id),
         )
         self.conn.commit()
         return row["scope"]
 
-    def remove_by_episode(self, episode: int) -> int:
+    def remove_by_episode(self, episode: int, step: int | None = None) -> int:
         cursor = self.conn.execute(
-            "UPDATE memory SET deleted = 1 WHERE scope = 'episode' AND source_episode = ? AND deleted = 0",
-            (episode,),
+            "UPDATE memory SET deleted_step = ? WHERE scope = 'episode' AND source_episode = ? AND deleted_step IS NULL",
+            (step, episode),
         )
         self.conn.commit()
         return cursor.rowcount
 
     def update(self, entry_id: str, new_content: str) -> bool:
         cursor = self.conn.execute(
-            "UPDATE memory SET content = ? WHERE id = ? AND deleted = 0",
+            "UPDATE memory SET content = ? WHERE id = ? AND deleted_step IS NULL",
             (new_content, entry_id),
         )
         self.conn.commit()
@@ -272,7 +283,7 @@ class BraidStorage:
     ) -> list[MemoryEntry]:
         """Search memory by content substring and optional filters."""
         query_lower = query.lower() if query else ""
-        conditions = ["deleted = 0"]
+        conditions = ["deleted_step IS NULL"]
         params: list[str | int] = []
 
         if query_lower:
@@ -331,7 +342,7 @@ class BraidStorage:
             priority=row["priority"],
             source_episode=row["source_episode"],
             source_step=row["source_step"],
-            deleted=bool(row["deleted"]),
+            deleted_step=row["deleted_step"],
             entry_id=row["id"],
             created_at=row["created_at"],
         )
@@ -569,13 +580,7 @@ class BraidStorage:
     def save_todos(
         self, episode: int, step: int, todos: list[dict[str, Any]]
     ) -> None:
-        """Save current todo state (replaces all todos for this episode)."""
-        # Clear existing todos for this episode
-        self.conn.execute(
-            "DELETE FROM todos WHERE worker_id = ? AND episode = ?",
-            (self.worker_id, episode),
-        )
-        # Insert new todos
+        """Append current todo state snapshot for this step (preserves history)."""
         now = self._now()
         for todo in todos:
             self.conn.execute(
@@ -593,14 +598,31 @@ class BraidStorage:
             )
         self.conn.commit()
 
-    def get_todos(self, episode: int) -> list[dict[str, Any]]:
-        """Get todos for an episode."""
+    def get_todos(self, episode: int, max_step: int | None = None) -> list[dict[str, Any]]:
+        """Get todos as they existed at a specific step."""
+        # Find the most recent snapshot step at or before max_step
+        if max_step is not None:
+            row = self.conn.execute(
+                "SELECT MAX(step) FROM todos WHERE worker_id = ? AND episode = ? AND step <= ?",
+                (self.worker_id, episode, max_step),
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                "SELECT MAX(step) FROM todos WHERE worker_id = ? AND episode = ?",
+                (self.worker_id, episode),
+            ).fetchone()
+
+        snapshot_step = row[0] if row and row[0] is not None else None
+        if snapshot_step is None:
+            return []
+
+        # Return todos from that snapshot
         rows = self.conn.execute(
             """SELECT content, active_form, status, step, updated_at
                FROM todos
-               WHERE worker_id = ? AND episode = ?
+               WHERE worker_id = ? AND episode = ? AND step = ?
                ORDER BY id ASC""",
-            (self.worker_id, episode),
+            (self.worker_id, episode, snapshot_step),
         ).fetchall()
         return [
             {

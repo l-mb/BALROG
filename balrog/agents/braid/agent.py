@@ -57,6 +57,7 @@ class BRAIDAgent(BaseAgent):
 
         # Journal config
         self._log_full_prompt = braid_cfg.get("log_full_prompt", False)
+        self._describe_adjacent = braid_cfg.get("describe_adjacent_tiles", False)
 
         # Step and token tracking (storage is stateless)
         self._step = 0
@@ -430,7 +431,16 @@ class BRAIDAgent(BaseAgent):
 
         sections.append(current_content)
 
-        sections.append("Think carefully about the current information, todos and goals, the result of your last actions, available tools and actions, before issuing your next action(s).")
+        # Describe adjacent tiles if enabled
+        if self._describe_adjacent and blstats is not None:
+            glyphs = raw_obs.get("glyphs") if isinstance(raw_obs, dict) else None
+            tty_chars = raw_obs.get("tty_chars") if isinstance(raw_obs, dict) else None
+            if glyphs is not None and tty_chars is not None:
+                from .compute.navigation import describe_adjacent_tiles
+                pos = (int(blstats[0]), int(blstats[1]))
+                sections.append(describe_adjacent_tiles(glyphs, tty_chars, pos))
+
+        sections.append("Think carefully about the current information, todos and goals, the result of your last actions, available tools and actions, before issuing your one next action tool call.")
 
         return "\n\n".join(sections)
 
@@ -590,14 +600,32 @@ class BRAIDAgent(BaseAgent):
                 hunger_name = hunger_names[current_hunger] if current_hunger < len(hunger_names) else f"?{current_hunger}"
                 return f"Hunger worsened to {hunger_name}"
 
-        # Pet interactions are normal, don't abort
-        pet_patterns = ["swap places", "your kitten", "your cat", "your dog", "your pony",
-                        "moves out of your way", "gets out of your way"]
-        is_pet_interaction = any(p in text_lower for p in pet_patterns)
+        # Pet movement interactions are normal, don't abort
+        pet_move_patterns = ["swap places", "moves out of your way", "gets out of your way"]
+        is_pet_move = any(p in text_lower for p in pet_move_patterns)
 
-        # Abort on combat indicators (but not pet-related)
-        combat_patterns = ["hits", "misses", "bites", "attacks", "throws", "swings"]
-        if any(p in text_lower for p in combat_patterns) and not is_pet_interaction:
+        # Harmless environmental messages to ignore
+        harmless_patterns = [
+            "gush of water",  # Fountain
+            "water hits",     # Fountain splash
+            "drink from",     # Fountain/sink
+            "door resists",   # Locked door
+            "wall here",      # Bumping into wall
+            "nothing happens",
+        ]
+        is_harmless = any(p in text_lower for p in harmless_patterns)
+
+        # Abort on combat indicators (but not harmless environmental effects)
+        # Pet combat SHOULD abort - pet may need aid
+        combat_patterns = [
+            " hits", " hit ",  # Combat hits (includes pet combat)
+            " misses", " miss ",
+            " bites", " bite ",
+            "attacks", "attack ",
+            "throws something", "throws a ",
+            "swings at", "swing at",
+        ]
+        if any(p in text_lower for p in combat_patterns) and not is_pet_move and not is_harmless:
             return "Combat detected"
 
         # Abort on significant HP drop (>20% since queue started)
@@ -776,7 +804,7 @@ class BRAIDAgent(BaseAgent):
         if self._batch_source == "explore_room":
             room = detect_room(glyphs, pos)
             if room:
-                new_actions = plan_room_exploration(glyphs, room, pos, visited=visited)
+                new_actions, _status = plan_room_exploration(glyphs, room, pos, visited=visited)
 
         if new_actions:
             self._action_queue = list(new_actions)

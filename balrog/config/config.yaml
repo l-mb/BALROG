@@ -14,6 +14,7 @@ agent:
     log_memory_details: true
     enable_compute_helpers: true
     tool_timeout: 30
+    describe_adjacent_tiles: false  # Describe 8 surrounding tiles with glyphs
 
 eval:
   output_dir: "results"  # Directory where evaluation results will be saved
