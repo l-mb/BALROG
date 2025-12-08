@@ -14,7 +14,7 @@ This GitHub repository is a fork of the BALROG project (see below) to explore th
 
 This is mostly localized in the [braid agent](balrog/agents/braid) with a few changes to make this work on my environment.
 
-See [the BRAID Report](BRAID Report.md) for more details.
+See [the BRAID Report](BRAID-Report-2025-12.md) for more details.
 
 Have a lot of fun!
 
