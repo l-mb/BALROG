@@ -6,6 +6,20 @@
 
 ---
 
+# BRAID: BALROG Recurrent Agentic Iterative Dungeoneer
+
+*By Lars Marowsky-Brée, 2025-12*
+
+This GitHub repository is a fork of the BALROG project (see below) to explore the benefits of using an Agentic AI framework (in this case, Anthropic's Claude SDK) with tool use for navigating the NetHack Learning environment in particular.
+
+This is mostly localized in the [braid agent](balrog/agents/braid) with a few changes to make this work on my environment.
+
+See [the BRAID Report](BRAID Report.md) for more details.
+
+Have a lot of fun!
+
+---
+
 # BALROG: Benchmarking Agentic LLM and VLM Reasoning On Games
 
 BALROG is a novel benchmark evaluating agentic LLM and VLM capabilities on long-horizon interactive tasks using reinforcement learning environments. Check out how current models fare on our [leaderboard](https://balrogai.com). You can read more about BALROG in our [paper](https://arxiv.org/abs/2411.13543).
